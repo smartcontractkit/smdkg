@@ -1,0 +1,55 @@
+package transmitter
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/smartcontractkit/libocr/offchainreporting2/types"
+	"github.com/smartcontractkit/libocr/offchainreporting2plus/ocr3types"
+	ocr2ptypes "github.com/smartcontractkit/libocr/offchainreporting2plus/types"
+
+	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
+)
+
+var _ ocr3types.ContractTransmitter[struct{}] = &Transmitter{}
+
+type Transmitter struct {
+	DealingPackageDatabase dkgocrtypes.ResultPackageDatabase
+	OffchainKeyring        ocr2ptypes.OffchainKeyring
+}
+
+// Transmit sends the report to the on-chain smart contract's Transmit method.
+// This is a dummy implementation that does nothing.
+func (t *Transmitter) Transmit(
+	ctx context.Context,
+	configDigest types.ConfigDigest,
+	seqNr uint64,
+	report ocr3types.ReportWithInfo[struct{}],
+	signatures []types.AttributedOnchainSignature,
+) error {
+	// no need to check signatures since libocr already handled that for us
+
+	var dealingPackage dkgocrtypes.ResultPackage
+
+	_ = dealingPackage
+
+	// unmarshal report into dealingPackage
+	// write to entry to t.DealingPackageDatabase that maps
+	// dealingPackage.InstanceID() -> {
+	//   configDigest,
+	//   seqNr,
+	//   report,
+	//   signatures,
+	// }
+
+	panic("not implemented yet")
+}
+
+// We use the offchain public key as the "transmitter" account, formatted as an Ethereum address for compatibility the
+// EVM contract used for configuration dissemination.
+// Example: If the offchain public key is aef16539e9c968943157f665da069451a20225b9875049897c14ec74db36228f
+// the returned Account is 0xc1c1c1c1aef16539e9c968943157f665da069451.
+func (t *Transmitter) FromAccount(ctx context.Context) (types.Account, error) {
+	pubKey := t.OffchainKeyring.OffchainPublicKey()
+	return types.Account(fmt.Sprintf("0xc1c1c1c1%x", pubKey[:16])), nil
+}
