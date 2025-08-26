@@ -1,6 +1,7 @@
 package oracleargs
 
 import (
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/smartcontractkit/libocr/commontypes"
 	"github.com/smartcontractkit/libocr/offchainreporting2plus"
@@ -8,6 +9,7 @@ import (
 	ocr2ptypes "github.com/smartcontractkit/libocr/offchainreporting2plus/types"
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
 	"github.com/smartcontractkit/smdkg/dkgocr/internal/onchainkeyring"
+	"github.com/smartcontractkit/smdkg/dkgocr/internal/plugin"
 	"github.com/smartcontractkit/smdkg/dkgocr/internal/transmitter"
 )
 
@@ -27,6 +29,7 @@ func OCR3_1OracleArgsForSanMarinoDKG(
 	// special for DKG
 	dkgP256Keyring dkgocrtypes.P256Keyring,
 	dealingResultPackageDatabase dkgocrtypes.ResultPackageDatabase,
+	configContractAddress common.Address,
 ) offchainreporting2plus.OCR3_1OracleArgs[struct{}] {
 
 	return offchainreporting2plus.OCR3_1OracleArgs[struct{}]{
@@ -43,6 +46,6 @@ func OCR3_1OracleArgsForSanMarinoDKG(
 		offchainConfigDigester,
 		offchainKeyring,
 		&onchainkeyring.OnchainKeyring{OffchainKeyring: offchainKeyring},
-		nil, // TODO: add reporting plugin factory
+		plugin.NewDKGPluginFactory(logger, dkgP256Keyring, dealingResultPackageDatabase, configContractAddress),
 	}
 }

@@ -35,6 +35,10 @@ func (dkg *dkg) Curve() math.Curve {
 	return dkg.curve
 }
 
+func (dkg *dkg) InstanceID() dkgtypes.InstanceID {
+	return dkg.iid
+}
+
 func (dkg *dkg) Dealers() []dkgtypes.PublicIdentity {
 	return dkg.dealers
 }
