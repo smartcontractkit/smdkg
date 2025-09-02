@@ -6,8 +6,22 @@ import (
 	"io"
 
 	"filippo.io/nistec"
+	"github.com/smartcontractkit/smdkg/internal/codec"
 	"github.com/smartcontractkit/smdkg/internal/math"
 )
+
+// Unique identifier for a DKG instance.
+type InstanceID string
+
+type P256Keyring interface {
+	// Returns the public key associated with the keyring's internal P-256 secret key.
+	PublicKey() P256PublicKey
+
+	// Computes the shared secret between the keyring's internal secret key (corresponding to keyring.PublicKey())
+	// and public key (publicKey) given as argument to this function. For guidance on how to implement this function,
+	// see, e.g., the standard library crypto/internal/fips140/ecdh/ecdh.go, lines 240-271.
+	ECDH(publicKey P256PublicKey) (sharedSecret P256ECDHSharedSecret, err error)
+}
 
 // For the implementation of MRE, we use the P256 curve at the 128-bit security level.
 // Note that the curve choice is independent of the curve used for the DKG protocol.
@@ -25,13 +39,10 @@ type P256PublicKey struct {
 	compressedEncoding []byte // 33 bytes, compressed encoding of the above *nistec.P256Point instance (cached)
 }
 
-type P256SecretKey []byte             // scalar, 32 bytes, big-endian encoded integer representing a secret key
-type P256SecretKeyShare P256SecretKey // scalar, 32 bytes, big-endian encoded integer representing a secret key share
+// Scalar, 32 bytes, big-endian encoded integer representing a secret key.
+const P256SecretKeyLength = 32
 
-// A key shares represents the Y-Coordinate of a participant's secret/public key share, the corresponding X-Coordinate
-// is given by the recipient's index (+1) of its public key in of all recipients's public keys.
-type MasterSecretKeyShare []byte
-type MasterPublicKeyShare []byte
+type P256SecretKey []byte
 
 // P256KeyPair represents a secret key and its corresponding public key on the P256 curve. Use NewP256KeyPair(...), to
 // generate a new key pair. For long lived secrets, consumers should implement the the PrivateIdentity interface via
@@ -43,6 +54,8 @@ type P256KeyPair struct {
 
 // Represents the result of the ECDH operation between a participant's secret key (wrapped in a keyring) and another
 // participant's public key. The 32 bytes value represents the x-coordinate of the ECDH result.
+const P256ECDHSharedSecretLength = 32
+
 type P256ECDHSharedSecret []byte
 
 // The number of points on the P256 curve. See: NIST 800-186, Section3.2.1.3
@@ -94,7 +107,7 @@ func NewP256PublicKey(value []byte) (P256PublicKey, error) {
 // Compute the shared ECDH secret between the local secret key and a peer's public key. The implementation is based on
 // the internal implementation from the stdlib, see crypto/internal/fips140/ecdh/ecdh.go, lines 240-271.
 // Only valid public keys, as returned by calls to NewPublicKey(...) or Keygen(...) must be used as arguments here.
-func (sk P256SecretKey) ECDH(pk P256PublicKey) ([]byte, error) {
+func (sk P256SecretKey) ECDH(pk P256PublicKey) (P256ECDHSharedSecret, error) {
 	p, err := nistec.NewP256Point().ScalarMult(pk.value, sk)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compute ECDH: %w", err)
@@ -112,7 +125,10 @@ func (pk P256PublicKey) Bytes() []byte {
 	if pk.value == nil {
 		return nil
 	}
-	return pk.compressedEncoding
+
+	var out [P256CompressedPointLength]byte
+	copy(out[:], pk.compressedEncoding)
+	return out[:]
 }
 
 // Check if the given PublicKey instance is a valid point on the curve.
@@ -124,4 +140,17 @@ func (pk P256PublicKey) IsValid() bool {
 // Checks if two PublicKey instances represent the same point on the curve.
 func (pk P256PublicKey) Equal(other P256PublicKey) bool {
 	return (pk.value == nil && other.value == nil) || subtle.ConstantTimeCompare(pk.compressedEncoding, other.compressedEncoding) == 1
+}
+
+func (pk P256PublicKey) MarshalTo(target codec.Target) {
+	target.WriteBytes(pk.compressedEncoding)
+}
+
+func (P256PublicKey) UnmarshalFrom(source codec.Source) P256PublicKey {
+	b := source.ReadBytes(P256CompressedPointLength)
+	pk, err := NewP256PublicKey(b)
+	if err != nil {
+		panic(err)
+	}
+	return pk
 }

@@ -1,6 +1,14 @@
 package math
 
+import "github.com/smartcontractkit/smdkg/internal/codec"
+
 type Curve interface {
+	// prevent outside packages from implementing this interface, (marshal/unmarshal would not work correctly)
+	internal()
+
+	codec.Marshaler
+	// Use math.UnmarshalCurve(...) to unmarshal.
+
 	// Returns the name of the curve.
 	// This is used for debugging and logging purposes.
 	Name() string
@@ -19,7 +27,7 @@ type Curve interface {
 
 	// Return the size of the group order of the curve, it corresponds to the domain of the Scalar type.
 	// This is NOT the prime modulus for the field over which the curve is defined.
-	GroupOrder() Modulus
+	GroupOrder() *Modulus
 
 	// c.ScalarBytes() returns the number of bytes used to encode a scalar (mod the group's order).
 	ScalarBytes() int

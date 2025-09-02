@@ -7,6 +7,7 @@ import (
 
 	"filippo.io/edwards25519"
 	"filippo.io/nistec"
+	"github.com/smartcontractkit/smdkg/internal/codec"
 )
 
 type P224Point struct {
@@ -73,6 +74,24 @@ func (v *P224Point) SetBytes(x []byte) (Point, error) {
 	}
 	// TODO: consider stricter validation, enforcing canonical encoding.
 	return v, nil
+}
+
+func (v *P224Point) MarshalTo(target codec.Target) {
+	target.WriteBytes(v.value.BytesCompressed())
+}
+
+func (v *P224Point) UnmarshalFrom(source codec.Source) Point {
+	var buf [p224CompressedLength]byte
+	source.ReadBytesInto(buf[:])
+	_, err := v.value.SetBytes(buf[:])
+	if err != nil {
+		panic("failed to unmarshal P224 point: " + err.Error())
+	}
+	return v
+}
+
+func (v *P224Point) IsNil() bool {
+	return v == nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -144,6 +163,24 @@ func (v *P256Point) SetBytes(x []byte) (Point, error) {
 	return v, nil
 }
 
+func (v *P256Point) MarshalTo(target codec.Target) {
+	target.WriteBytes(v.value.BytesCompressed())
+}
+
+func (v *P256Point) UnmarshalFrom(source codec.Source) Point {
+	var buf [p256CompressedLength]byte
+	source.ReadBytesInto(buf[:])
+	_, err := v.value.SetBytes(buf[:])
+	if err != nil {
+		panic("failed to unmarshal P256 point: " + err.Error())
+	}
+	return v
+}
+
+func (v *P256Point) IsNil() bool {
+	return v == nil
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -213,6 +250,24 @@ func (v *P384Point) SetBytes(x []byte) (Point, error) {
 	return v, nil
 }
 
+func (v *P384Point) MarshalTo(target codec.Target) {
+	target.WriteBytes(v.value.BytesCompressed())
+}
+
+func (v *P384Point) UnmarshalFrom(source codec.Source) Point {
+	var buf [p384CompressedLength]byte
+	source.ReadBytesInto(buf[:])
+	_, err := v.value.SetBytes(buf[:])
+	if err != nil {
+		panic("failed to unmarshal P384 point: " + err.Error())
+	}
+	return v
+}
+
+func (v *P384Point) IsNil() bool {
+	return v == nil
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -280,6 +335,24 @@ func (v *P521Point) SetBytes(x []byte) (Point, error) {
 	}
 	// TODO: consider stricter validation, enforcing canonical encoding.
 	return v, nil
+}
+
+func (v *P521Point) MarshalTo(target codec.Target) {
+	target.WriteBytes(v.value.BytesCompressed())
+}
+
+func (v *P521Point) UnmarshalFrom(source codec.Source) Point {
+	var buf [p521CompressedLength]byte
+	source.ReadBytesInto(buf[:])
+	_, err := v.value.SetBytes(buf[:])
+	if err != nil {
+		panic("failed to unmarshal P521 point: " + err.Error())
+	}
+	return v
+}
+
+func (v *P521Point) IsNil() bool {
+	return v == nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -357,4 +430,22 @@ func (v *Edward25519Point) SetBytes(x []byte) (Point, error) {
 	}
 	// TODO: consider stricter validation, enforcing canonical encoding.
 	return v, nil
+}
+
+func (v *Edward25519Point) MarshalTo(target codec.Target) {
+	target.WriteBytes(v.value.Bytes())
+}
+
+func (v *Edward25519Point) UnmarshalFrom(source codec.Source) Point {
+	var buf [edwards25519CompressedLength]byte
+	source.ReadBytesInto(buf[:])
+	_, err := v.value.SetBytes(buf[:])
+	if err != nil {
+		panic("failed to unmarshal Edwards25519 point: " + err.Error())
+	}
+	return v
+}
+
+func (v *Edward25519Point) IsNil() bool {
+	return v == nil
 }

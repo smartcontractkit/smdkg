@@ -1,17 +1,13 @@
 // [TODO]
-// How to properly retrieve secret keys?
 // Use blob dissemination for broadcasting dealings to avoid overwhelming the bandwidth of the leader
 // Currently not optimized when the network is not synchronized, may allowing gradually increasing the set of dealings and decryption shares
 // Transmit dkg results periodically (not to a blockchain but other offchain nodes)
-// What happens if an OCR node crashes during a DKG instance and restarts at any state of the protocol? Should it generate the same dealing as before crashing?
 
 package plugin
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
 	"io"
 
@@ -21,18 +17,11 @@ import (
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/ocr3types"
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/types"
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
+	"github.com/smartcontractkit/smdkg/internal/codec"
 	"github.com/smartcontractkit/smdkg/internal/dkg"
 	"github.com/smartcontractkit/smdkg/internal/dkgtypes"
+	"github.com/smartcontractkit/smdkg/internal/hash"
 	"github.com/smartcontractkit/smdkg/internal/math"
-	"github.com/smartcontractkit/smdkg/internal/serialization"
-)
-
-type StateMachineState int
-
-const (
-	Started StateMachineState = iota
-	ReceivedOuterDealings
-	GatheredInnerDealings
 )
 
 var _ = &DKGPluginFactory{}
@@ -59,63 +48,58 @@ func (f *DKGPluginFactory) NewReportingPlugin(context context.Context,
 ) (ocr3_1types.ReportingPlugin[struct{}], ocr3_1types.ReportingPluginInfo, error) {
 	iid := dkgocrtypes.MakeInstanceID(f.configContractAddress, config.ConfigDigest)
 
+	keyring, err := newWrappedP256Keyring(f.keyring)
+	if err != nil {
+		return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to create DKG keyring: %w", err)
+	}
+
 	dkgConfig := &dkgocrtypes.ReportingPluginConfig{}
 	if err := dkgConfig.UnmarshalBinary(config.OffchainConfig); err != nil {
 		return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to unmarshal DKG plugin config: %w", err)
 	}
 
-	var privID *recipientIdentity
-	pk, err := dkgtypes.NewP256PublicKey(f.keyring.PublicKey())
-	if err != nil {
-		return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to create public key: %w", err)
-	}
-
-	dealersPublicKeys := make([]dkgtypes.ParticipantPublicKey, len(dkgConfig.DealerPublicKeys))
+	dealersPublicKeys := make([]dkgtypes.P256PublicKey, len(dkgConfig.DealerPublicKeys))
 	for i, k := range dkgConfig.DealerPublicKeys {
-		dealersPublicKeys[i] = dkgtypes.ParticipantPublicKey(k)
-		if bytes.Equal(dealersPublicKeys[i], f.keyring.PublicKey()) {
-			privID = &recipientIdentity{
-				f.keyring,
-				pk,
-				i,
-				math.P256.Scalar().SetUint(uint(i + 1)),
-			}
+		dealersPublicKeys[i], err = dkgtypes.NewP256PublicKey(k)
+		if err != nil {
+			return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to derive dealer public key: %w", err)
 		}
 	}
 
-	recipientsPublicKeys := make([]dkgtypes.ParticipantPublicKey, len(dkgConfig.RecipientPublicKeys))
+	recipientsPublicKeys := make([]dkgtypes.P256PublicKey, len(dkgConfig.RecipientPublicKeys))
 	for i, k := range dkgConfig.RecipientPublicKeys {
-		recipientsPublicKeys[i] = dkgtypes.ParticipantPublicKey(k)
+		recipientsPublicKeys[i], err = dkgtypes.NewP256PublicKey(k)
+		if err != nil {
+			return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to derive recipient public key: %w", err)
+		}
 	}
 
-	var newDKG dkg.DKG
-	if dkgConfig.PreviousInstanceID == nil {
-		newDKG, err = dkg.NewInitialDKG(string(iid), math.P256, dealersPublicKeys, recipientsPublicKeys, config.F, dkgConfig.T, privID)
-		if err != nil {
-			return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to create DKG instance: %w", err)
-		}
-	} else {
-		priorResult, err := f.dealingResultPackageDatabase.ReadResultPackage(context, *dkgConfig.PreviousInstanceID)
-		if err != nil {
-			return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to read prior result package: %w", err)
-		}
-
-		var resultPackage ResultPackage
-		if err := resultPackage.UnmarshalBinary(priorResult.ReportWithResultPackage); err != nil {
-			return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to unmarshal prior result package: %w", err)
-		}
-
-		newDKG, err = dkg.NewResharingDKG(string(iid), dealersPublicKeys, recipientsPublicKeys, config.F, dkgConfig.T, &resultPackage.inner, privID)
-		if err != nil {
-			return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to create DKG instance: %w", err)
-		}
+	verifiedInitialDealings := make([]map[hashOfUnverifiedObject]dkg.VerifiedInitialDealing, config.N)
+	for i := 0; i < config.N; i++ {
+		verifiedInitialDealings[i] = make(map[hashOfUnverifiedObject]dkg.VerifiedInitialDealing)
+	}
+	verifiedDecryptionKeyShares := make([]map[hashOfUnverifiedObject]dkg.VerifiedDecryptionKeySharesForInnerDealing, config.N)
+	for i := 0; i < config.N; i++ {
+		verifiedDecryptionKeyShares[i] = make(map[hashOfUnverifiedObject]dkg.VerifiedDecryptionKeySharesForInnerDealing)
+	}
+	cachedValues := &cachedValues{
+		nil,
+		verifiedInitialDealings,
+		verifiedDecryptionKeyShares,
 	}
 
 	return &DKGPlugin{
 			f.logger,
-			newDKG,
+			dkgConfig,
+			iid,
+			dealersPublicKeys,
+			recipientsPublicKeys,
+			config.F,
+			dkgConfig.T,
+			keyring,
+			f.dealingResultPackageDatabase,
+			cachedValues,
 			rand.Reader, // [TODO] Need to confirm the use of rng here
-			nil,
 		}, ocr3_1types.ReportingPluginInfo{
 			"DKGPlugin",
 			ocr3_1types.ReportingPluginLimits{ // [TODO] These limits need to be revisited
@@ -127,27 +111,49 @@ func (f *DKGPluginFactory) NewReportingPlugin(context context.Context,
 				90 * 1024,
 				1024,
 			},
-		},
-		nil
+		}, nil
 }
 
 type DKGPlugin struct {
-	logger commontypes.Logger
-	dkg    dkg.DKG
-	rand   io.Reader
-	state  *dkgState
+	logger                       commontypes.Logger
+	config                       *dkgocrtypes.ReportingPluginConfig
+	iid                          dkgocrtypes.InstanceID
+	dealersPublicKeys            []dkgtypes.P256PublicKey
+	recipientsPublicKeys         []dkgtypes.P256PublicKey
+	f_D                          int
+	t_R                          int
+	keyring                      dkgtypes.P256Keyring
+	dealingResultPackageDatabase dkgocrtypes.ResultPackageDatabase
+	cachedValues                 *cachedValues
+	rand                         io.Reader
 }
 
-type dkgState struct {
-	stateMachineState   StateMachineState
-	cntStartFromScratch int
-	bannedDealers       []bool
-	dealings            []dkg.Dealing
-	decryptionShares    DecryptionKeyShares
-	innerDealings       []dkg.InnerDealing
+type hashOfUnverifiedObject = [32]byte
+
+// Contains all the in-memory cached state for a DKGPlugin, shouldn't be accessed directly
+type cachedValues struct {
+	dkg                         dkg.DKG
+	verifiedInitialDealings     []map[hashOfUnverifiedObject]dkg.VerifiedInitialDealing // [TODO] Any spamming protection? E.g., renew after the counter increases or when the size his a threshold?
+	verifiedDecryptionKeyShares []map[hashOfUnverifiedObject]dkg.VerifiedDecryptionKeySharesForInnerDealing
 }
 
-type DecryptionKeyShares map[dkgtypes.PublicIdentity]math.Scalars
+type stateMachineState int
+
+const (
+	Started                 stateMachineState = iota // the initial state of a dkg round
+	ReceivedInitialDealings                          // received enough valid initial dealings and written to kv store
+	GatheredInnerDealings                            // gathered enough valid inner dealings and written to kv store
+)
+
+type pluginState struct {
+	stateMachineState stateMachineState
+	countRestart      int
+}
+
+type bannedDealers []bool
+type initialDealings []dkg.VerifiedInitialDealing
+type decryptionKeyShares []dkg.VerifiedDecryptionKeySharesForInnerDealing
+type innerDealings []dkg.VerifiedInnerDealing
 
 var _ ocr3_1types.ReportingPlugin[struct{}] = &DKGPlugin{}
 
@@ -158,58 +164,127 @@ func (p *DKGPlugin) Query(ctx context.Context, seqNr uint64, keyValueReader ocr3
 
 func (p *DKGPlugin) observationStarted(ctx context.Context, seqNr uint64, aq types.AttributedQuery,
 	keyValueReader ocr3_1types.KeyValueReader, blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher) (types.Observation, error) {
-	dealing, err := p.dkg.Deal(p.rand)
+	dkgInstance, err := p.dkgInstance(ctx)
 	if err != nil {
 		return nil, err
 	}
-	ob, err := dealing.Bytes()
+
+	dealing, err := dkgInstance.Deal(p.rand)
 	if err != nil {
 		return nil, err
+	}
+
+	ob, err := codec.Marshal(dealing.AsUnverifiedDealing())
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal unverified initial dealing: %w", err)
 	}
 	return ob, nil
 }
 
-func (p *DKGPlugin) observationReceivedOuterDealings(ctx context.Context, seqNr uint64, aq types.AttributedQuery, keyValueReader ocr3_1types.KeyValueReader, blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher) (types.Observation, error) {
-	shares, err := p.dkg.DecryptDecryptionKeyShares(p.state.dealings)
+func (p *DKGPlugin) observationReceivedInitialDealings(ctx context.Context, seqNr uint64, aq types.AttributedQuery, keyValueReader ocr3_1types.KeyValueReader, blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher, state *pluginState) (types.Observation, error) {
+	dkgInstance, err := p.dkgInstance(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return shares.Bytes()
+
+	dealings, err := p.readReceivedInitialDealings(keyValueReader, state.countRestart)
+	if err != nil {
+		return nil, err
+	}
+
+	shares, err := dkgInstance.DecryptDecryptionKeyShares(dealings)
+	if err != nil {
+		return nil, err
+	}
+
+	ob, err := codec.Marshal(shares.AsUnverifiedShares())
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal unverified decryption key shares: %w", err)
+	}
+	return ob, nil
 }
 
-func (p *DKGPlugin) observationGatheredInnerDealings(ctx context.Context, seqNr uint64, aq types.AttributedQuery, keyValueReader ocr3_1types.KeyValueReader, blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher) (types.Observation, error) {
+func (p *DKGPlugin) observationGatheredInnerDealings(ctx context.Context, seqNr uint64, aq types.AttributedQuery, keyValueReader ocr3_1types.KeyValueReader, blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher, state *pluginState) (types.Observation, error) {
 	// [TODO] Periodically transmit the DKG result
 	return make([]byte, 0), nil
 }
 
 func (p *DKGPlugin) Observation(ctx context.Context, seqNr uint64, aq types.AttributedQuery, keyValueReader ocr3_1types.KeyValueReader, blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher) (types.Observation, error) {
-	if err := p.readDKGState(keyValueReader); err != nil {
+	state, err := p.readPluginState(keyValueReader)
+	if err != nil {
 		return nil, err
 	}
 
-	switch p.state.stateMachineState {
+	switch state.stateMachineState {
 	case Started:
 		return p.observationStarted(ctx, seqNr, aq, keyValueReader, blobBroadcastFetcher)
-	case ReceivedOuterDealings:
-		return p.observationReceivedOuterDealings(ctx, seqNr, aq, keyValueReader, blobBroadcastFetcher)
+	case ReceivedInitialDealings:
+		return p.observationReceivedInitialDealings(ctx, seqNr, aq, keyValueReader, blobBroadcastFetcher, state)
 	case GatheredInnerDealings:
-		return p.observationGatheredInnerDealings(ctx, seqNr, aq, keyValueReader, blobBroadcastFetcher)
+		return p.observationGatheredInnerDealings(ctx, seqNr, aq, keyValueReader, blobBroadcastFetcher, state)
 	default:
-		return nil, fmt.Errorf("unknown state machine state: %v", p.state.stateMachineState)
+		return nil, fmt.Errorf("unknown state machine state: %v", state.stateMachineState)
 	}
 }
 
-func (p *DKGPlugin) validateObservationStarted(ctx context.Context, seqNr uint64, aq types.AttributedQuery, ao types.AttributedObservation, keyValueReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher) error {
-	_, err := p.dkg.VerifyDealing(p.dkg.Dealers()[ao.Observer], ao.Observation)
-	return err
+func (p *DKGPlugin) validateObservationStarted(ctx context.Context, seqNr uint64, aq types.AttributedQuery, ao types.AttributedObservation, keyValueReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher, state *pluginState) error {
+	dkgInstance, err := p.dkgInstance(ctx)
+	if err != nil {
+		return err
+	}
+
+	if state.countRestart > 0 {
+		bannedDealers, err := p.readBannedDealers(keyValueReader)
+		if err != nil {
+			return err
+		}
+
+		// Should reject observations from banned dealers
+		if bannedDealers[ao.Observer] {
+			return fmt.Errorf("banned dealer %d attempted to submit observation", ao.Observer)
+		}
+	}
+
+	initialDealing, err := codec.Unmarshal(ao.Observation, dkg.NewUnverifiedInitialDealing())
+	if err != nil {
+		return err
+	}
+
+	verifiedInitialDealing, err := dkgInstance.VerifyInitialDealing(initialDealing, int(ao.Observer))
+	if err != nil {
+		return fmt.Errorf("failed to verify initial dealing from dealer %d: %w", ao.Observer, err)
+	}
+
+	p.cacheVerifiedInitialDealing(int(ao.Observer), ao.Observation, verifiedInitialDealing)
+	return nil
 }
 
-func (p *DKGPlugin) validateObservationReceivedOuterDealings(ctx context.Context, seqNr uint64, aq types.AttributedQuery, ao types.AttributedObservation, keyValueReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher) error {
-	_, err := p.dkg.VerifyDecryptionKeyShares(ao.Observation, p.state.dealings, p.dkg.Dealers()[ao.Observer])
-	return err
+func (p *DKGPlugin) validateObservationReceivedInitialDealings(ctx context.Context, seqNr uint64, aq types.AttributedQuery, ao types.AttributedObservation, keyValueReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher, state *pluginState) error {
+	dkgInstance, err := p.dkgInstance(ctx)
+	if err != nil {
+		return err
+	}
+
+	dealings, err := p.readReceivedInitialDealings(keyValueReader, state.countRestart)
+	if err != nil {
+		return err
+	}
+
+	decryptionKeyShares, err := codec.Unmarshal(ao.Observation, dkg.NewUnverifiedDecryptionKeySharesForInnerDealing())
+	if err != nil {
+		return err
+	}
+
+	verifiedDecryptionKeyShares, err := dkgInstance.VerifyDecryptionKeyShares(dealings, decryptionKeyShares, int(ao.Observer))
+	if err != nil {
+		return fmt.Errorf("failed to verify decryption key shares from dealer %d: %w", ao.Observer, err)
+	}
+
+	p.cacheVerifiedDecryptionKeyShares(int(ao.Observer), ao.Observation, verifiedDecryptionKeyShares)
+	return nil
 }
 
-func (p *DKGPlugin) validateObservationGatheredInnerDealings(ctx context.Context, seqNr uint64, aq types.AttributedQuery, ao types.AttributedObservation, keyValueReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher) error {
+func (p *DKGPlugin) validateObservationGatheredInnerDealings(ctx context.Context, seqNr uint64, aq types.AttributedQuery, ao types.AttributedObservation, keyValueReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher, state *pluginState) error {
 	// [TODO] Periodically transmit the DKG result
 	return nil
 }
@@ -217,153 +292,170 @@ func (p *DKGPlugin) validateObservationGatheredInnerDealings(ctx context.Context
 func (p *DKGPlugin) ValidateObservation(ctx context.Context, seqNr uint64, aq types.AttributedQuery,
 	ao types.AttributedObservation, keyValueReader ocr3_1types.KeyValueReader,
 	blobFetcher ocr3_1types.BlobFetcher) error {
-	if err := p.readDKGState(keyValueReader); err != nil {
+	state, err := p.readPluginState(keyValueReader)
+	if err != nil {
 		return err
 	}
 
-	if p.state.bannedDealers[ao.Observer] {
-		return fmt.Errorf("banned dealer %d attempted to submit observation", ao.Observer)
-	}
-
-	switch p.state.stateMachineState {
+	switch state.stateMachineState {
 	case Started:
-		return p.validateObservationStarted(ctx, seqNr, aq, ao, keyValueReader, blobFetcher)
-	case ReceivedOuterDealings:
-		return p.validateObservationReceivedOuterDealings(ctx, seqNr, aq, ao, keyValueReader, blobFetcher)
+		return p.validateObservationStarted(ctx, seqNr, aq, ao, keyValueReader, blobFetcher, state)
+	case ReceivedInitialDealings:
+		return p.validateObservationReceivedInitialDealings(ctx, seqNr, aq, ao, keyValueReader, blobFetcher, state)
 	case GatheredInnerDealings:
-		return p.validateObservationGatheredInnerDealings(ctx, seqNr, aq, ao, keyValueReader, blobFetcher)
+		return p.validateObservationGatheredInnerDealings(ctx, seqNr, aq, ao, keyValueReader, blobFetcher, state)
 	default:
-		return fmt.Errorf("unknown state machine state: %v", p.state.stateMachineState)
+		return fmt.Errorf("unknown state machine state: %v", state.stateMachineState)
 	}
 }
 
 func (p *DKGPlugin) ObservationQuorum(ctx context.Context, seqNr uint64, aq types.AttributedQuery,
 	aos []types.AttributedObservation, keyValueReader ocr3_1types.KeyValueReader,
 	blobFetcher ocr3_1types.BlobFetcher) (bool, error) {
-	if err := p.readDKGState(keyValueReader); err != nil {
+	dkgInstance, err := p.dkgInstance(ctx)
+	if err != nil {
 		return false, err
 	}
 
-	switch p.state.stateMachineState {
+	state, err := p.readPluginState(keyValueReader)
+	if err != nil {
+		return false, err
+	}
+
+	switch state.stateMachineState {
 	case Started:
-		return len(aos) >= p.dkg.DealingsThreshold(), nil
-	case ReceivedOuterDealings:
-		return len(aos) >= p.dkg.DecryptionThreshold(), nil
+		return len(aos) >= dkgInstance.DealingsThreshold(), nil
+	case ReceivedInitialDealings:
+		return len(aos) >= dkgInstance.DecryptionThreshold(), nil
 	case GatheredInnerDealings:
 		// [TODO] Periodically transmit the DKG result
 		return false, nil
 	default:
-		return false, fmt.Errorf("unknown state machine state: %v", p.state.stateMachineState)
+		return false, fmt.Errorf("unknown state machine state: %v", state.stateMachineState)
 	}
 }
 
 func (p *DKGPlugin) stateTransitionStarted(ctx context.Context, seqNr uint64, aq types.AttributedQuery,
 	aos []types.AttributedObservation, keyValueReadWriter ocr3_1types.KeyValueReadWriter,
-	blobFetcher ocr3_1types.BlobFetcher) (ocr3_1types.ReportsPlusPrecursor, error) {
-	dealings := make([]dkg.Dealing, p.dkg.DealingsThreshold())
-	for i := 0; i < p.dkg.DealingsThreshold(); i++ {
-		var err error
-		dealings[i], err = p.dkg.VerifyDealing(p.dkg.Dealers()[aos[i].Observer], aos[i].Observation) // [TODO] Would be nice if a deserialization function is available, since ao is already verified
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if err := p.writeStateMachineState(keyValueReadWriter, ReceivedOuterDealings); err != nil {
-		return nil, err
-	}
-
-	if err := p.writeReceivedOuterDealings(keyValueReadWriter, p.state.cntStartFromScratch, p.state.dealings); err != nil {
-		return nil, err
-	}
-
-	// [TODO] Should plugin state be changed before or after writing to kvStore? When would writing fail when the outer dealings are valid?
-	p.state.stateMachineState = ReceivedOuterDealings
-	p.state.dealings = dealings
-
-	p.logger.Info("🚀🚀🚀 DKGPlugin: received enough outer dealings", commontypes.LogFields{})
-
-	return nil, nil
-}
-
-func (p *DKGPlugin) stateTransitionReceivedOuterDealings(ctx context.Context, seqNr uint64, aq types.AttributedQuery,
-	aos []types.AttributedObservation, keyValueReadWriter ocr3_1types.KeyValueReadWriter,
-	blobFetcher ocr3_1types.BlobFetcher) (ocr3_1types.ReportsPlusPrecursor, error) {
-	decryptionShares := make(DecryptionKeyShares)
-	for _, ao := range aos {
-		decryptionShare, err := p.dkg.VerifyDecryptionKeyShares(ao.Observation, p.state.dealings, p.dkg.Dealers()[ao.Observer]) // [TODO] Would be nice if a deserialization function is available, since ao is already verified
-		if err != nil {
-			return nil, err
-		}
-		dealer := p.dkg.Dealers()[ao.Observer]
-		decryptionShares[dealer] = decryptionShare
-	}
-
-	innerDealings, bannedDealers, startFromScratch, err := p.dkg.RecoverInnerDealings(p.state.dealings, decryptionShares)
+	blobFetcher ocr3_1types.BlobFetcher, state *pluginState) (ocr3_1types.ReportsPlusPrecursor, error) {
+	dkgInstance, err := p.dkgInstance(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	bannedList := make([]bool, len(p.dkg.Dealers()))
-	for i := range bannedList {
-		bannedList[i] = p.state.bannedDealers[i]
+	dealings := make([]dkg.VerifiedInitialDealing, len(p.dealersPublicKeys))
+	for _, ao := range aos {
+		var err error
+		dealings[ao.Observer], err = p.recoverVerifiedInitialDealing(dkgInstance, int(ao.Observer), ao.Observation)
+		if err != nil {
+			return nil, err
+		}
 	}
-	for i := range bannedDealers {
-		bannedList[bannedDealers[i].Index()] = true
+
+	// Only keep the first dkg.DealingsThreshold() dealings, in a deterministic manner
+	// [TODO] Should be determined by the time instead of index, need to revisit
+	cnt := len(aos) - dkgInstance.DealingsThreshold()
+	for i := 0; i < len(dealings); i++ {
+		if dealings[i] != nil {
+			if cnt == 0 {
+				break
+			}
+			dealings[i] = nil
+			cnt--
+		}
 	}
 
-	// [TODO] Should this be checked before err?
-	if startFromScratch {
-		if err := p.writeStateMachineState(keyValueReadWriter, Started); err != nil {
-			return nil, err
-		}
+	if err := p.writeReceivedInitialDealings(keyValueReadWriter, state.countRestart, dealings); err != nil {
+		return nil, err
+	}
 
-		if err := p.writeCntStartFromScratch(keyValueReadWriter, p.state.cntStartFromScratch+1); err != nil {
-			return nil, err
-		}
+	newState := pluginState{ReceivedInitialDealings, state.countRestart}
+	if err := p.writePluginState(keyValueReadWriter, &newState); err != nil {
+		return nil, err
+	}
 
-		if err := p.writeGatheredInnerDealings(keyValueReadWriter, p.state.cntStartFromScratch, decryptionShares, innerDealings, bannedList); err != nil {
-			return nil, err
-		}
+	p.logger.Info("🚀🚀🚀 DKGPlugin: received enough initial dealings", commontypes.LogFields{})
 
-		p.state.stateMachineState = Started
-		p.state.cntStartFromScratch++
-		p.state.decryptionShares = decryptionShares
-		p.state.innerDealings = innerDealings
-		p.state.bannedDealers = bannedList
+	return nil, nil
+}
 
-		p.logger.Info("🚀 DKGPlugin: restart from scratch", commontypes.LogFields{})
+func (p *DKGPlugin) stateTransitionReceivedInitialDealings(ctx context.Context, seqNr uint64, aq types.AttributedQuery,
+	aos []types.AttributedObservation, keyValueReadWriter ocr3_1types.KeyValueReadWriter,
+	blobFetcher ocr3_1types.BlobFetcher, state *pluginState) (ocr3_1types.ReportsPlusPrecursor, error) {
+	dkgInstance, err := p.dkgInstance(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-		return nil, nil
-	} else {
-		if err := p.writeStateMachineState(keyValueReadWriter, GatheredInnerDealings); err != nil {
-			return nil, err
-		}
+	dealings, err := p.readReceivedInitialDealings(keyValueReadWriter, state.countRestart)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read received initial dealings: %w", err)
+	}
 
-		if err := p.writeGatheredInnerDealings(keyValueReadWriter, p.state.cntStartFromScratch, decryptionShares, innerDealings, bannedList); err != nil {
-			return nil, err
-		}
-
-		// TODO!!!
-		reportsPlusPrecursor, err := serializeInnerDealings(innerDealings) // [TODO] Add DKG instanceID and digest?
+	decryptionKeyShares := make(decryptionKeyShares, len(p.dealersPublicKeys))
+	for i, ao := range aos {
+		var err error
+		decryptionKeyShares[ao.Observer], err = p.recoverVerifiedDecryptionKeyShares(dkgInstance, dealings, int(ao.Observer), ao.Observation)
 		if err != nil {
 			return nil, err
 		}
 
-		p.state.stateMachineState = GatheredInnerDealings
-		p.state.decryptionShares = decryptionShares
-		p.state.innerDealings = innerDealings
-		p.state.bannedDealers = bannedList
+		// Keep only dkg.DecryptionThreshold() decryption key shares, any subset should be sufficient for recovery deterministically
+		if i+1 == dkgInstance.DecryptionThreshold() {
+			break
+		}
+	}
+
+	innerDealings, bannedList, restart, err := dkgInstance.RecoverInnerDealings(dealings, decryptionKeyShares)
+	if err != nil {
+		return nil, fmt.Errorf("failed to recover inner dealings: %w", err)
+	}
+
+	bannedDealers, err := p.readBannedDealers(keyValueReadWriter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read banned dealers: %w", err)
+	}
+	for _, bannedDealer := range bannedList {
+		bannedDealers[bannedDealer] = true
+	}
+
+	if err := p.writeGatheredInnerDealings(keyValueReadWriter, state.countRestart, decryptionKeyShares, innerDealings, bannedDealers); err != nil {
+		return nil, err
+	}
+
+	if restart {
+		newState := pluginState{Started, state.countRestart + 1}
+		if err := p.writePluginState(keyValueReadWriter, &newState); err != nil {
+			return nil, err
+		}
+
+		p.logger.Info("🚀 DKGPlugin: restart from scratch", commontypes.LogFields{})
+		return nil, nil
+	} else {
+		newState := pluginState{GatheredInnerDealings, state.countRestart}
+		if err := p.writePluginState(keyValueReadWriter, &newState); err != nil {
+			return nil, err
+		}
+
+		result, err := dkgInstance.NewResult(innerDealings)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create DKG result: %w", err)
+		}
+
+		resultPackage := ResultPackage{result, p.config}
+		reportsPlusPrecursor, err := resultPackage.MarshalBinary()
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal DKG result package: %w", err)
+		}
 
 		p.logger.Info("🚀🚀🚀🚀🚀 DKGPlugin: gathered enough inner dealings", commontypes.LogFields{})
-
 		return reportsPlusPrecursor, nil
 	}
 }
 
 func (p *DKGPlugin) stateTransitionGatheredInnerDealings(ctx context.Context, seqNr uint64, aq types.AttributedQuery,
 	aos []types.AttributedObservation, keyValueReadWriter ocr3_1types.KeyValueReadWriter,
-	blobFetcher ocr3_1types.BlobFetcher) (ocr3_1types.ReportsPlusPrecursor, error) {
+	blobFetcher ocr3_1types.BlobFetcher, state *pluginState) (ocr3_1types.ReportsPlusPrecursor, error) {
 	// [TODO] Periodically transmit the DKG result
 	return nil, nil
 }
@@ -371,19 +463,20 @@ func (p *DKGPlugin) stateTransitionGatheredInnerDealings(ctx context.Context, se
 func (p *DKGPlugin) StateTransition(ctx context.Context, seqNr uint64, aq types.AttributedQuery,
 	aos []types.AttributedObservation, keyValueReadWriter ocr3_1types.KeyValueReadWriter,
 	blobFetcher ocr3_1types.BlobFetcher) (ocr3_1types.ReportsPlusPrecursor, error) {
-	if err := p.readDKGState(keyValueReadWriter); err != nil {
+	state, err := p.readPluginState(keyValueReadWriter)
+	if err != nil {
 		return nil, err
 	}
 
-	switch p.state.stateMachineState {
+	switch state.stateMachineState {
 	case Started:
-		return p.stateTransitionStarted(ctx, seqNr, aq, aos, keyValueReadWriter, blobFetcher)
-	case ReceivedOuterDealings:
-		return p.stateTransitionReceivedOuterDealings(ctx, seqNr, aq, aos, keyValueReadWriter, blobFetcher)
+		return p.stateTransitionStarted(ctx, seqNr, aq, aos, keyValueReadWriter, blobFetcher, state)
+	case ReceivedInitialDealings:
+		return p.stateTransitionReceivedInitialDealings(ctx, seqNr, aq, aos, keyValueReadWriter, blobFetcher, state)
 	case GatheredInnerDealings:
-		return p.stateTransitionGatheredInnerDealings(ctx, seqNr, aq, aos, keyValueReadWriter, blobFetcher)
+		return p.stateTransitionGatheredInnerDealings(ctx, seqNr, aq, aos, keyValueReadWriter, blobFetcher, state)
 	default:
-		return nil, fmt.Errorf("unknown state machine state: %v", p.state.stateMachineState)
+		return nil, fmt.Errorf("unknown state machine state: %v", state.stateMachineState)
 	}
 }
 
@@ -412,327 +505,252 @@ func (p *DKGPlugin) ShouldAcceptAttestedReport(context.Context, uint64, ocr3type
 }
 
 func (p *DKGPlugin) ShouldTransmitAcceptedReport(context.Context, uint64, ocr3types.ReportWithInfo[struct{}]) (bool, error) {
-	return true, nil // [TODO] Periodically transmit the DKG result
+	return true, nil
 }
 
 func (p *DKGPlugin) Close() error {
 	return nil
 }
 
-func (p *DKGPlugin) readDKGState(keyValueReader ocr3_1types.KeyValueReader) error {
-	// [TODO] State read from kvStore whenever a plugin function is called to make sure the state is up-to-date. May consider optimize this.
-	// Fetch the State Machine State
-	stateMachineState, cntStartFromScratch, bannedDealers, err := p.readStateCntBannedDealers(keyValueReader)
-	if err != nil {
-		return err
-	}
-
-	if stateMachineState == Started {
-		p.state = &dkgState{
-			stateMachineState,
-			cntStartFromScratch,
-			bannedDealers,
-			make([]dkg.Dealing, 0),
-			make(DecryptionKeyShares),
-			make([]dkg.InnerDealing, 0),
+func (p *DKGPlugin) dkgInstance(ctx context.Context) (dkg.DKG, error) {
+	if p.cachedValues.dkg == nil {
+		if err := p.newDKG(ctx); err != nil {
+			return nil, err
 		}
-		return nil
 	}
+	return p.cachedValues.dkg, nil
+}
 
-	outerDealingsRaw, err := keyValueReader.Read(p.getOuterDealingsKey(cntStartFromScratch))
-	if err != nil {
-		return err
-	}
-
-	outerDealings, err := deserializeOuterDealings(outerDealingsRaw)
-	if err != nil {
-		return err
-	}
-
-	if stateMachineState == ReceivedOuterDealings {
-		p.state = &dkgState{
-			stateMachineState,
-			cntStartFromScratch,
-			bannedDealers,
-			outerDealings,
-			make(DecryptionKeyShares),
-			make([]dkg.InnerDealing, 0),
+func (p *DKGPlugin) newDKG(ctx context.Context) error {
+	var newDKG dkg.DKG
+	if p.config.PreviousInstanceID == nil {
+		var err error
+		newDKG, err = dkg.NewInitialDKG(dkgtypes.InstanceID(p.iid), math.P256, p.dealersPublicKeys, p.recipientsPublicKeys, p.f_D, p.t_R, p.keyring)
+		if err != nil {
+			return fmt.Errorf("failed to create DKG instance for fresh dealing: %w", err)
 		}
-		return nil
+	} else {
+		priorResult, err := p.dealingResultPackageDatabase.ReadResultPackage(ctx, *p.config.PreviousInstanceID)
+		if err != nil {
+			return fmt.Errorf("failed to read prior result package: %w", err)
+		}
+
+		var resultPackage ResultPackage
+		if err := resultPackage.UnmarshalBinary(priorResult.ReportWithResultPackage); err != nil {
+			return fmt.Errorf("failed to unmarshal prior result package: %w", err)
+		}
+
+		newDKG, err = dkg.NewResharingDKG(dkgtypes.InstanceID(p.iid), p.dealersPublicKeys, p.recipientsPublicKeys, p.f_D, p.t_R, p.keyring, resultPackage.inner)
+		if err != nil {
+			return fmt.Errorf("failed to create DKG instance for resharing: %w", err)
+		}
 	}
 
-	decryptionKeySharesRaw, err := keyValueReader.Read(p.getDecryptionKeySharesKey(cntStartFromScratch))
+	p.cachedValues.dkg = newDKG
+	return nil
+}
+
+const dstHashUnverifiedInitialDealing = "smartcontract.com/dkgocr/plugin/hashUnverifiedInitialDealing"
+const dstHashUnverifiedDecryptionKeyShares = "smartcontract.com/dkgocr/plugin/hashUnverifiedDecryptionKeyShares"
+
+func hashUnverifiedObject(dst string, raw []byte) hashOfUnverifiedObject {
+	hash := hash.NewHash(dst)
+	hash.WriteBytes(raw)
+	digest := hash.Digest()
+
+	var res [32]byte
+	copy(res[:], digest)
+	return res
+}
+
+func (p *DKGPlugin) cacheVerifiedInitialDealing(observer int, raw []byte, dealing dkg.VerifiedInitialDealing) {
+	hash := hashUnverifiedObject(dstHashUnverifiedInitialDealing, raw)
+	if p.cachedValues.verifiedInitialDealings[observer][hash] == nil {
+		p.cachedValues.verifiedInitialDealings[observer][hash] = dealing
+	}
+}
+
+func (p *DKGPlugin) recoverVerifiedInitialDealing(dkgInstance dkg.DKG, observer int, raw []byte) (dkg.VerifiedInitialDealing, error) {
+	hash := hashUnverifiedObject(dstHashUnverifiedInitialDealing, raw)
+	if dealing, ok := p.cachedValues.verifiedInitialDealings[observer][hash]; ok {
+		return dealing, nil
+	} else {
+		unverifiedDealing, err := codec.Unmarshal(raw, dkg.NewUnverifiedInitialDealing())
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal unverified initial dealing: %w", err)
+		}
+		return dkgInstance.VerifyInitialDealing(unverifiedDealing, observer)
+	}
+}
+
+func (p *DKGPlugin) cacheVerifiedDecryptionKeyShares(observer int, raw []byte, shares dkg.VerifiedDecryptionKeySharesForInnerDealing) {
+	hash := hashUnverifiedObject(dstHashUnverifiedDecryptionKeyShares, raw)
+	if p.cachedValues.verifiedDecryptionKeyShares[observer][hash] == nil {
+		p.cachedValues.verifiedDecryptionKeyShares[observer][hash] = shares
+	}
+}
+
+func (p *DKGPlugin) recoverVerifiedDecryptionKeyShares(dkgInstance dkg.DKG, dealings initialDealings, observer int, raw []byte) (dkg.VerifiedDecryptionKeySharesForInnerDealing, error) {
+	hash := hashUnverifiedObject(dstHashUnverifiedDecryptionKeyShares, raw)
+	if shares, ok := p.cachedValues.verifiedDecryptionKeyShares[observer][hash]; ok {
+		return shares, nil
+	} else {
+		unverifiedShares, err := codec.Unmarshal(raw, dkg.NewUnverifiedDecryptionKeySharesForInnerDealing())
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal unverified decryption key shares: %w", err)
+		}
+		return dkgInstance.VerifyDecryptionKeyShares(dealings, unverifiedShares, observer)
+	}
+}
+
+const pluginStateKey = "PluginState"
+const bannedDealersKey = "BannedDealers"
+const initialDealingsKey = "InitialDealings"
+const decryptionKeySharesKey = "DecryptionKeyShares"
+const innerDealingsKey = "InnerDealings"
+
+func (p *DKGPlugin) getPluginStateKey() []byte {
+	return []byte(fmt.Sprintf("%s_%s", p.iid, pluginStateKey))
+}
+
+func (p *DKGPlugin) getBannedDealersKey() []byte {
+	return []byte(fmt.Sprintf("%s_%s", p.iid, bannedDealersKey))
+}
+
+func (p *DKGPlugin) getInitialDealingsKey(countRestart int) []byte {
+	return []byte(fmt.Sprintf("%s_%s_%d", p.iid, initialDealingsKey, countRestart))
+}
+
+func (p *DKGPlugin) getDecryptionKeySharesKey(countRestart int) []byte {
+	return []byte(fmt.Sprintf("%s_%s_%d", p.iid, decryptionKeySharesKey, countRestart))
+}
+
+func (p *DKGPlugin) getInnerDealingsKey(countRestart int) []byte {
+	return []byte(fmt.Sprintf("%s_%s_%d", p.iid, innerDealingsKey, countRestart))
+}
+
+func (p *DKGPlugin) readPluginState(keyValueReader ocr3_1types.KeyValueReader) (*pluginState, error) {
+	data, err := keyValueReader.Read(p.getPluginStateKey())
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to read plugin state from key-value store: %w", err)
 	}
 
-	decryptionKeyShares, err := p.deserializeDecryptionKeyShares(decryptionKeySharesRaw)
+	if len(data) > 0 {
+		state, err := codec.Unmarshal(data, &pluginState{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal plugin state: %w", err)
+		}
+		return state, nil
+	} else {
+		return &pluginState{Started, 0}, nil
+	}
+}
+
+func (p *DKGPlugin) writePluginState(keyValueReadWriter ocr3_1types.KeyValueReadWriter, state *pluginState) error {
+	data, err := codec.Marshal(state)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal plugin state: %w", err)
 	}
 
-	innerDealingsRaw, err := keyValueReader.Read(p.getInnerDealingsKey(cntStartFromScratch))
+	err = keyValueReadWriter.Write(p.getPluginStateKey(), data)
 	if err != nil {
-		return err
-	}
-
-	innerDealings, err := deserializeInnerDealings(innerDealingsRaw)
-	if err != nil {
-		return err
-	}
-
-	p.state = &dkgState{
-		stateMachineState,
-		cntStartFromScratch,
-		bannedDealers,
-		outerDealings,
-		decryptionKeyShares,
-		innerDealings,
+		return fmt.Errorf("failed to write plugin state to key-value store: %w", err)
 	}
 	return nil
 }
 
-const stateMachineStateKey = "StateMachineState"
-const cntStartFromScratchKey = "CntStartFromScratch"
-const bannedDealersKey = "BannedDealers"
-const outerDealingsKey = "OuterDealings"
-const decryptionKeySharesKey = "DecryptionKeyShares"
-const innerDealingsKey = "InnerDealings"
+func (p *DKGPlugin) readBannedDealers(keyValueReader ocr3_1types.KeyValueReader) (bannedDealers, error) {
+	data, err := keyValueReader.Read(p.getBannedDealersKey())
+	if err != nil {
+		return nil, fmt.Errorf("failed to read banned dealers from key-value store: %w", err)
+	}
 
-func (p *DKGPlugin) getStateMachineStateKey() []byte {
-	return []byte(fmt.Sprintf("%s_%s", p.dkg.InstanceID(), stateMachineStateKey))
-}
-
-func (p *DKGPlugin) getCntStartFromScratchKey() []byte {
-	return []byte(fmt.Sprintf("%s_%s", p.dkg.InstanceID(), cntStartFromScratchKey))
-}
-
-func (p *DKGPlugin) getBannedDealersKey() []byte {
-	return []byte(fmt.Sprintf("%s_%s", p.dkg.InstanceID(), bannedDealersKey))
-}
-
-func (p *DKGPlugin) getOuterDealingsKey(cntStartFromScratch int) []byte {
-	return []byte(fmt.Sprintf("%s_%s_%d", p.dkg.InstanceID(), outerDealingsKey, cntStartFromScratch))
-}
-
-func (p *DKGPlugin) getDecryptionKeySharesKey(cntStartFromScratch int) []byte {
-	return []byte(fmt.Sprintf("%s_%s_%d", p.dkg.InstanceID(), decryptionKeySharesKey, cntStartFromScratch))
-}
-
-func (p *DKGPlugin) getInnerDealingsKey(cntStartFromScratch int) []byte {
-	return []byte(fmt.Sprintf("%s_%s_%d", p.dkg.InstanceID(), innerDealingsKey, cntStartFromScratch))
-}
-
-func (p *DKGPlugin) readStateCntBannedDealers(keyValueReader ocr3_1types.KeyValueReader) (StateMachineState, int, []bool, error) {
-	var state StateMachineState = Started
-	var cntStartFromScratch = 0
-	bannedDealers := make([]bool, len(p.dkg.Dealers()))
-	for i := range p.dkg.Dealers() {
+	bannedDealers := make(bannedDealers, len(p.dealersPublicKeys))
+	for i := range bannedDealers {
 		bannedDealers[i] = false
 	}
 
-	stateRaw, err := keyValueReader.Read(p.getStateMachineStateKey())
-	if err != nil {
-		return state, cntStartFromScratch, bannedDealers, err
-	}
-
-	if len(stateRaw) > 0 {
-		state, err = deserializeStateInStateMachine(stateRaw)
+	if len(data) > 0 {
+		bannedDealers, err = codec.Unmarshal(data, &bannedDealers)
 		if err != nil {
-			return state, cntStartFromScratch, bannedDealers, err
+			return nil, fmt.Errorf("failed to unmarshal banned dealers: %w", err)
 		}
-
-		raw, err := keyValueReader.Read(p.getCntStartFromScratchKey())
-		if err != nil {
-			return state, cntStartFromScratch, bannedDealers, err
-		}
-
-		if len(raw) > 0 {
-			cntStartFromScratch, err = deserializeCntStartFromScratch(raw)
-			if err != nil {
-				return state, cntStartFromScratch, bannedDealers, err
-
-			}
-
-			raw, err = keyValueReader.Read(p.getBannedDealersKey())
-			if err != nil {
-				return state, cntStartFromScratch, bannedDealers, err
-			}
-
-			bannedDealers, err = deserializeBannedDealers(raw, len(p.dkg.Dealers()))
-			if err != nil {
-				return state, cntStartFromScratch, bannedDealers, err
-			}
-		}
-	}
-
-	return state, cntStartFromScratch, bannedDealers, nil
-}
-
-func (p *DKGPlugin) writeStateMachineState(keyValueReadWriter ocr3_1types.KeyValueReadWriter, state StateMachineState) error {
-	data, err := serializeStateMachineState(state)
-	if err != nil {
-		return err
-	}
-	return keyValueReadWriter.Write(p.getStateMachineStateKey(), data)
-}
-
-func (p *DKGPlugin) writeReceivedOuterDealings(keyValueReadWriter ocr3_1types.KeyValueReadWriter, cnt int, dealings []dkg.Dealing) error {
-	data, err := serializeOuterDealings(dealings)
-	if err != nil {
-		return err
-	}
-	return keyValueReadWriter.Write(p.getOuterDealingsKey(cnt), data)
-}
-
-func (p *DKGPlugin) writeCntStartFromScratch(keyValueReadWriter ocr3_1types.KeyValueReadWriter, cnt int) error {
-	data, err := serializeCntStartFromScratch(cnt)
-	if err != nil {
-		return err
-	}
-	return keyValueReadWriter.Write(p.getCntStartFromScratchKey(), data)
-}
-
-func (p *DKGPlugin) writeGatheredInnerDealings(keyValueReadWriter ocr3_1types.KeyValueReadWriter, cnt int, decryptionKeyShares DecryptionKeyShares, innerDealings []dkg.InnerDealing, bannedDealers []bool) error {
-	data, err := p.serializeDecryptionKeyShares(decryptionKeyShares)
-	if err != nil {
-		return err
-	}
-	if err := keyValueReadWriter.Write(p.getDecryptionKeySharesKey(cnt), data); err != nil {
-		return err
-	}
-
-	data, err = serializeInnerDealings(innerDealings)
-	if err != nil {
-		return err
-	}
-	if err := keyValueReadWriter.Write(p.getInnerDealingsKey(cnt), data); err != nil {
-		return err
-	}
-
-	data, err = serializeBannedDealers(bannedDealers)
-	if err != nil {
-		return err
-	}
-	return keyValueReadWriter.Write(p.getBannedDealersKey(), data)
-}
-
-func serializeStateMachineState(state StateMachineState) ([]byte, error) {
-	encoder := serialization.NewEncoder()
-	encoder.WriteInt(int(state))
-	return encoder.Bytes()
-}
-
-func deserializeStateInStateMachine(raw []byte) (StateMachineState, error) {
-	decoder := serialization.NewDecoder(raw)
-	state := decoder.ReadInt()
-	if err := decoder.Finish(); err != nil {
-		return 0, err
-	}
-	return StateMachineState(state), nil
-}
-
-func serializeCntStartFromScratch(cnt int) ([]byte, error) {
-	encoder := serialization.NewEncoder()
-	encoder.WriteInt(cnt)
-	return encoder.Bytes()
-}
-
-func deserializeCntStartFromScratch(raw []byte) (int, error) {
-	decoder := serialization.NewDecoder(raw)
-	cnt := decoder.ReadInt()
-	if err := decoder.Finish(); err != nil {
-		return 0, err
-	}
-	return cnt, nil
-}
-
-func serializeBannedDealers(bannedDealers []bool) ([]byte, error) {
-	encoder := serialization.NewEncoder()
-	for _, banned := range bannedDealers {
-		encoder.WriteBool(banned)
-	}
-	return encoder.Bytes()
-}
-
-func deserializeBannedDealers(raw []byte, dealerCount int) ([]bool, error) {
-	bannedDealers := make([]bool, dealerCount)
-
-	decoder := serialization.NewDecoder(raw)
-	for i := 0; i < dealerCount; i++ {
-		bannedDealers[i] = decoder.ReadBool()
-	}
-	if err := decoder.Finish(); err != nil {
-		return bannedDealers, err
 	}
 	return bannedDealers, nil
 }
 
-// [TODO] All serialization using json.Marshal to be optimized!!!
-func serializeOuterDealings(dealings []dkg.Dealing) ([]byte, error) {
-	return json.Marshal(dealings)
+func (p *DKGPlugin) readReceivedInitialDealings(keyValueReader ocr3_1types.KeyValueReader, countRestart int) (initialDealings, error) {
+	raw, err := keyValueReader.Read(p.getInitialDealingsKey(countRestart))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read initial dealings from key-value store: %w", err)
+	}
+
+	initialDealings, err := codec.Unmarshal(raw, &initialDealings{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal initial dealings: %w", err)
+	}
+	return initialDealings, nil
 }
 
-func deserializeOuterDealings(raw []byte) ([]dkg.Dealing, error) {
-	var dealings []dkg.Dealing
-	if err := json.Unmarshal(raw, &dealings); err != nil {
-		return nil, err
+func (p *DKGPlugin) writeReceivedInitialDealings(keyValueReadWriter ocr3_1types.KeyValueReadWriter, countRestart int, dealings initialDealings) error {
+	data, err := codec.Marshal(dealings)
+	if err != nil {
+		return fmt.Errorf("failed to marshal initial dealings: %w", err)
 	}
-	return dealings, nil
+
+	err = keyValueReadWriter.Write(p.getInitialDealingsKey(countRestart), data)
+	if err != nil {
+		return fmt.Errorf("failed to write initial dealings to key-value store: %w", err)
+	}
+	return nil
 }
 
-func (p *DKGPlugin) serializeDecryptionKeyShares(dks DecryptionKeyShares) ([]byte, error) {
-	encoder := serialization.NewEncoder()
-	for _, dealer := range p.dkg.Dealers() {
-		if shares, ok := dks[dealer]; ok {
-			encoder.WriteInt(len(shares))
-			for _, share := range shares {
-				encoder.WriteBytes(share.Bytes())
-			}
-		} else {
-			encoder.WriteInt(0)
-		}
+func (p *DKGPlugin) readGatheredInnerDealings(keyValueReader ocr3_1types.KeyValueReader, countRestart int) (*decryptionKeyShares, innerDealings, error) {
+	raw, err := keyValueReader.Read(p.getDecryptionKeySharesKey(countRestart))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read decryption key shares from key-value store: %w", err)
 	}
-	return encoder.Bytes()
+	decryptionKeyShares, err := codec.Unmarshal(raw, &decryptionKeyShares{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to unmarshal decryption key shares: %w", err)
+	}
+
+	raw, err = keyValueReader.Read(p.getInnerDealingsKey(countRestart))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read inner dealings from key-value store: %w", err)
+	}
+	innerDealings, err := codec.Unmarshal(raw, &innerDealings{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to unmarshal inner dealings: %w", err)
+	}
+
+	return &decryptionKeyShares, innerDealings, nil
 }
 
-func (p *DKGPlugin) deserializeDecryptionKeyShares(data []byte) (DecryptionKeyShares, error) {
-	dks := make(DecryptionKeyShares)
-	decoder := serialization.NewDecoder(data)
-
-	for _, dealer := range p.dkg.Dealers() {
-		numShares := decoder.ReadInt()
-		if numShares <= 0 {
-			return nil, fmt.Errorf("deserialization failed, invalid number of shares (%d)", numShares)
-		}
-		if numShares == 0 {
-			continue
-		}
-
-		shares := make(math.Scalars, numShares)
-		for i := 0; i < numShares; i++ {
-			share, err := p.dkg.Curve().Scalar().SetBytes(decoder.ReadBytes())
-			if err != nil {
-				return nil, err
-			}
-			shares[i] = share
-		}
-		dks[dealer] = shares
+func (p *DKGPlugin) writeGatheredInnerDealings(keyValueReadWriter ocr3_1types.KeyValueReadWriter, countRestart int, decryptionKeyShares decryptionKeyShares, innerDealings innerDealings, bannedDealers bannedDealers) error {
+	data, err := codec.Marshal(decryptionKeyShares)
+	if err != nil {
+		return fmt.Errorf("failed to marshal decryption key shares: %w", err)
 	}
-	if err := decoder.Finish(); err != nil {
-		return nil, err
+	if err := keyValueReadWriter.Write(p.getDecryptionKeySharesKey(countRestart), data); err != nil {
+		return fmt.Errorf("failed to write decryption key shares to key-value store: %w", err)
 	}
-	return dks, nil
-}
 
-func serializeInnerDealings(ids []dkg.InnerDealing) ([]byte, error) {
-	return json.Marshal(ids)
-}
-
-func deserializeInnerDealings(raw []byte) ([]dkg.InnerDealing, error) {
-	var ids []dkg.InnerDealing
-	if err := json.Unmarshal(raw, &ids); err != nil {
-		return nil, err
+	data, err = codec.Marshal(innerDealings)
+	if err != nil {
+		return fmt.Errorf("failed to marshal inner dealings: %w", err)
 	}
-	return ids, nil
+	if err := keyValueReadWriter.Write(p.getInnerDealingsKey(countRestart), data); err != nil {
+		return fmt.Errorf("failed to write inner dealings to key-value store: %w", err)
+	}
+
+	data, err = codec.Marshal(bannedDealers)
+	if err != nil {
+		return fmt.Errorf("failed to marshal banned dealers: %w", err)
+	}
+	if err := keyValueReadWriter.Write(p.getBannedDealersKey(), data); err != nil {
+		return fmt.Errorf("failed to write banned dealers to key-value store: %w", err)
+	}
+
+	return nil
 }

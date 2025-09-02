@@ -12,6 +12,12 @@ import (
 
 // The InstanceID is a string that uniquely identifies a DKG instance.
 // Use MakeInstanceID to create an InstanceID from a config contract address and a config digest.
+//
+// The InstanceID must serve as a binding commitment to the configuration of the DKG instance parameters (including,
+// among the other values, the public keys of dealers and recipients).
+//
+// TODO: Re-evaluate the above requirement regarding the binding commitment in the future and consider lifting it
+// by enforcing it internally.
 type InstanceID string
 
 func MakeInstanceID(configContract common.Address, configDigest types.ConfigDigest) InstanceID {

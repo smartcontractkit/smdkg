@@ -24,7 +24,7 @@ var p256ParamPNeg1Half = math.NewScalarFromString(
 // general-purpose hash-to-curve implementation.
 func NewP256CRS(iid dkgtypes.InstanceID, tag string) (dkgtypes.P256PublicKey, error) {
 	h := hash.NewHash("smartcontract.com/dkg/crs")
-	h.WriteString(iid)
+	h.WriteString(string(iid))
 	h.WriteString(tag)
 
 	for {
@@ -44,13 +44,12 @@ func NewP256CRS(iid dkgtypes.InstanceID, tag string) (dkgtypes.P256PublicKey, er
 		}
 
 		encodedPoint := make([]byte, 33)
-		h.Read(encodedPoint[:1]) // read random sign byte
-
-		// Fixed the encoding to match the P256 compressed point format.
-		encodedPoint[0] |= 0x02
-		encodedPoint[0] &= 0x03
-
 		copy(encodedPoint[1:], x.Bytes())
+
+		// Randomize the sign bit uniformly; result is 0x02 or 0x03.
+		sign := []byte{0}
+		h.Read(sign)
+		encodedPoint[0] = 0x02 | (sign[0] & 0x01)
 
 		p, err := dkgtypes.NewP256PublicKey(encodedPoint)
 		if err != nil {

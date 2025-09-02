@@ -5,102 +5,82 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	stdmath "math"
-	"math/big"
 
+	"github.com/smartcontractkit/smdkg/internal/codec"
 	"github.com/smartcontractkit/smdkg/internal/crs"
 	"github.com/smartcontractkit/smdkg/internal/dkgtypes"
 	"github.com/smartcontractkit/smdkg/internal/hash"
 	"github.com/smartcontractkit/smdkg/internal/math"
 	"github.com/smartcontractkit/smdkg/internal/mre"
-	"github.com/smartcontractkit/smdkg/internal/serialization"
 )
 
 type Scalar = math.Scalar
 type Point = math.Point
 type Polynomial = math.Polynomial
 type PolynomialCommitment = math.PolynomialCommitment
-
-type PrivateIdentity = dkgtypes.PrivateIdentity
-type PublicIdentity = dkgtypes.PublicIdentity
-type P256PublicKey = dkgtypes.P256PublicKey
-
 type Ciphertext = []byte
 
 const (
 	digestSize                         = 32
 	expansionSeedSize                  = 16
 	statisticalSecurityBits            = 64
-	computeWeightForParameterSelection = 0.5
+	computeWeightForParameterSelection = 50 // trade-off factor for optimal parameter selection, in percent [0, 100]
 )
 
 type ExpansionSeed = [expansionSeedSize]byte
 
 type VESS interface {
+	internal() *vess
+
 	// Deal generates a VESS dealing for the secret s, with the polynomial degree t - 1, for N recipients with
 	// identities R. `nil` may be passed as value for R, in which case the default identities {1, 2, ..., N} are used.
-	// The encryption keys for the recipients are provided in ekR, and additional authenticated data is provided in ad.
+	// The encryption keys for the recipients are provided in ekR, and additional associated data is provided in ad.
 	// The function returns the a serialized dealing containing:
 	//  - the commitment vector C,
 	//  - the hash h,
 	//  - and the ρ vector (forming the ZKP).
-	Deal(s Scalar, to []PublicIdentity, ad []byte, rand io.Reader) (Dealing, error)
+	Deal(s Scalar, ad []byte, rand io.Reader) (*VerifiedDealing, error)
 
-	// Parses a serialized VESS dealing D and verifies it.
-	// After a successful verification the returned dealing instance can be used to decrypt a participant's share.
-	VerifyDealing(D []byte, to []PublicIdentity, ad []byte) (Dealing, error)
+	// Verifies a given dealing against the VESS instance parameters.
+	// Only after a successful verification the dealing instance may be used to decrypt a participant's share.
+	VerifyDealing(D *UnverifiedDealing, ad []byte) (*VerifiedDealing, error)
 
-	// Given the VESS dealing D, decrypt the secret share for recipient R using its secret key.
-	Decrypt(R PrivateIdentity, D Dealing) (Scalar, error)
+	// Given the VESS dealing D, decrypt the secret share for recipient R using its keyring for operations against R's
+	// secret key dk_R.
+	Decrypt(R int, dk_R dkgtypes.P256Keyring, D *VerifiedDealing, ad []byte) (Scalar, error)
 
 	// Verifies the validity of the share s_R for recipient R, given the dealing D.
 	// Returns nil if the share is valid, or an error if the share is invalid.
-	VerifyShare(s_R Scalar, D Dealing, R PublicIdentity) error
-}
+	VerifyShare(s_R Scalar, D *VerifiedDealing, R int) error
 
-// Dealing interface to hide the implementation details.
-// There is (and must be) only one implementation of this interface, which is the `dealing` struct.
-type Dealing interface {
-	internal() *dealing               // Prevent external code from implementing this interface.
-	Bytes() ([]byte, error)           // Serializes the dealing into a byte slice.
-	Commitment() PolynomialCommitment // Returns the commitment vector C of the dealing.
-}
-
-// The only implementation of the Dealing interface.
-type dealing struct {
-	// members for serialization
-	C PolynomialCommitment
-	h []byte
-	ρ [][]byte
-
-	// non-serialized members
-	n  int
-	ad []byte
-	S  []bool
-	wʺ []math.Polynomial
-	E  []Ciphertext
-}
-
-func (d *dealing) internal() *dealing {
-	return d
-}
-
-func (d *dealing) Commitment() PolynomialCommitment {
-	return d.C
+	// Returns the VESS instance parameters used, an (N, M) tuple.
+	Params() VESSParams
 }
 
 type vess struct {
-	curve math.Curve             // elliptic curve used for the VESS protocol
-	crs   dkgtypes.P256PublicKey // common reference string, derived from the DKG's instance ID
-	n     int                    // number of recipients
-	t     int                    // secret sharing threshold
-	N     int                    // repetition parameter
-	M     int                    // subset size parameter
+	curve      math.Curve               // elliptic curve used for the VESS protocol
+	crs        dkgtypes.P256PublicKey   // common reference string, derived from the DKG's instance ID
+	n          int                      // number of recipients
+	t          int                      // secret sharing threshold
+	recipients []dkgtypes.P256PublicKey // recipient public keys
+	ek         []dkgtypes.P256PublicKey // recipients public keys || crs
+	N          int                      // repetition parameter
+	M          int                      // subset size parameter
+}
+
+type VESSParams struct {
+	N int // repetition parameter
+	M int // subset size parameter
 }
 
 // Initialize a new VESS instance for the given curve and DKG instance id.
 // The DKG instance id is used to derive the common reference string (CRS) for the VESS & MRE protocol.
-func NewVESS(curve math.Curve, iid dkgtypes.InstanceID, tag string, n int, t int) (VESS, error) {
+// When initializing a VESS instance for decryption only, `nil` may be passed as value for recipients.
+func NewVESS(curve math.Curve, iid dkgtypes.InstanceID, tag string, n int, t int, recipients []dkgtypes.P256PublicKey) (VESS, error) {
+	if t <= 0 || n <= 0 || n < t {
+		return nil, fmt.Errorf("invalid parameters n (%d) and t (%d)", n, t)
+	}
+
 	crs, err := crs.NewP256CRS(iid, tag)
 	if err != nil {
 		return nil, err
@@ -109,15 +89,32 @@ func NewVESS(curve math.Curve, iid dkgtypes.InstanceID, tag string, n int, t int
 	CPs := candidateParameters(curve, n, t, statisticalSecurityBits)
 	OP := selectOptimalParameters(CPs, computeWeightForParameterSelection)
 
-	return &vess{curve, crs, n, t, OP.N, OP.M}, nil
+	var ek []dkgtypes.P256PublicKey
+	var R []dkgtypes.P256PublicKey
+
+	if recipients != nil {
+		if len(recipients) != n {
+			return nil, fmt.Errorf("number of recipient public keys (%d) does not match n (%d)", len(recipients), n)
+		}
+		ek = make([]dkgtypes.P256PublicKey, n+1)
+		copy(ek, recipients)
+		ek[n] = crs
+		R = ek[:n:n]
+	}
+
+	return &vess{curve, crs, n, t, R, ek, OP.N, OP.M}, nil
+}
+
+func (v *vess) internal() *vess {
+	return v
 }
 
 // Generates a VESS dealing for the secret s, with random polynomial of degree t - 1.
-func (v *vess) Deal(s Scalar, to []PublicIdentity, ad []byte, rand io.Reader) (Dealing, error) {
-	if len(to) != v.n {
-		return nil, fmt.Errorf("expected %d recipients, got %d", v.n, len(to))
+func (v *vess) Deal(s Scalar, ad []byte, rand io.Reader) (*VerifiedDealing, error) {
+	// Safeguard to ensure only VESS instances initialized with recipient public keys are used for dealing.
+	if v.recipients == nil {
+		return nil, fmt.Errorf("cannot create dealing without recipient public keys")
 	}
-	ek := v.prepareEncryptionKeys(to) // Set ek <-- ek_R || crs = [to[0].PublicKey, ..., to[n-1].PublicKey, v.crs]
 
 	// Initialize the coefficients of a random polynomial ω(x) of degree t - 1, its 1st coefficient is set to s.
 	w, err := math.RandomPolynomial(s, v.t, rand)
@@ -129,31 +126,30 @@ func (v *vess) Deal(s Scalar, to []PublicIdentity, ad []byte, rand io.Reader) (D
 	C := w.Commitment(v.curve)
 
 	seed := make([]ExpansionSeed, v.N)
-	Cd := make([][]Point, v.N)
+	Cꞌ := make([][]Point, v.N)
 	E := make([]Ciphertext, v.N)
 	wꞌ := make([][]Scalar, v.N)
 	wʺ := make([]math.Polynomial, v.N)
-	ρ := make([][]byte, v.N)
+
+	ρ_wʺ := make([][]math.Scalar, 0, v.M)
+	ρ_E := make([]Ciphertext, 0, v.M)
+	ρ_seed := make([]ExpansionSeed, 0, v.N-v.M)
 
 	for k := 0; k < v.N; k++ {
 		// Generate a random expansion seedₖ.
 		if _, err := io.ReadFull(rand, seed[k][:]); err != nil {
 			return nil, err
 		}
-		if wꞌ[k], Cd[k], E[k], err = v.round(to, ek, k, seed[k], ad); err != nil {
+		if wꞌ[k], Cꞌ[k], E[k], err = v.round(k, seed[k], ad); err != nil {
 			return nil, err
 		}
 	}
 
 	// Compute h <-- hComp(C'₁, E₁, ..., C'_N, E_N, ad).
-	h, err := v.hComp(Cd, E, ad)
-	if err != nil {
-		return nil, err
-	}
+	h := v.hComp(Cꞌ, E, ad)
 
 	// Compute S <-- hCh(C, h, ad), where S represents a uniformly at random selected subset of size M of the set
 	// {0, 1, 2, ..., N-1}.
-
 	S, err := v.hCh(C, h, ad)
 	if err != nil {
 		return nil, err
@@ -161,37 +157,33 @@ func (v *vess) Deal(s Scalar, to []PublicIdentity, ad []byte, rand io.Reader) (D
 
 	for k, kInS := range S {
 		if kInS {
-			// if k ∈ S, compute [ω"ₖ] <-- [ω] + [ω′ₖ] and set the response ρₖ <-- (ω"ₖ, Eₖ).
-			wʺ[k] = make([]Scalar, v.t)
-			for j := 0; j < v.t; j++ {
-				wʺ[k][j] = w[j].Clone().Add(wꞌ[k][j])
-			}
-			if ρ[k], err = v.packRho(wʺ[k], E[k]); err != nil {
-				return nil, err
-			}
+			// if k ∈ S, compute [ω"ₖ] <-- [ω] + [ω′ₖ] and set the response ρₖ <-- (ω"ₖ, Eₖ)
+			wʺ[k] = math.ScalarsAddElementWise(w, wꞌ[k])
+			ρ_wʺ = append(ρ_wʺ, wʺ[k])
+			ρ_E = append(ρ_E, E[k])
 		} else {
-			// if k ∉ S, sets the response ρₖ <-- seedₖ ,
-			ρ[k] = seed[k][:]
+			// if k ∉ S, set the response ρₖ <-- seedₖ
+			ρ_seed = append(ρ_seed, seed[k])
 		}
 	}
 
-	return &dealing{C, h, ρ, v.n, ad, S, wʺ, E}, nil
+	return &VerifiedDealing{UnverifiedDealing{C, h, ρ_wʺ, ρ_E, ρ_seed}}, nil
 }
 
-// Verify parses the serialized dealing D, verifies it, and returns a Dealing instance if the verification is
-// successful. The returned Dealing instance can then be used to decrypt the ciphertext for particular recipient.
-func (v *vess) VerifyDealing(D []byte, to []PublicIdentity, ad []byte) (Dealing, error) {
-	if len(to) != v.n {
-		return nil, fmt.Errorf("expected %d recipients, got %d", v.n, len(to))
-	}
-	ek := v.prepareEncryptionKeys(to) // Set [ek] <-- [ek_R] || crs
-
-	d, err := v.loadDealing(D)
-	if err != nil {
-		return nil, fmt.Errorf("invalid dealing (parsing failed): %w", err)
+// Verifies a given dealing D against the VESS instance parameters and the associated data ad.
+func (v *vess) VerifyDealing(D *UnverifiedDealing, ad []byte) (*VerifiedDealing, error) {
+	// Safeguard to ensure only VESS instances initialized with recipient public keys are used for verification.
+	if v.recipients == nil {
+		return nil, fmt.Errorf("VESS instance not initializalized with the recipients's public keys")
 	}
 
-	C, h, ρ := d.C, d.h, d.ρ
+	// Verify that the received data structure is well-formed.
+	if err := v.validateDealing(D); err != nil {
+		return nil, err
+	}
+
+	// Extract the components of the dealing for easier access.
+	C, h, ρ_wʺ, ρ_E, ρ_seed := D.c, D.h, D.ρ_wʺ, D.ρ_E, D.ρ_seed
 
 	// Recompute S <-- hCh([C], h, ad) for verification.
 	S, err := v.hCh(C, h, ad)
@@ -199,57 +191,68 @@ func (v *vess) VerifyDealing(D []byte, to []PublicIdentity, ad []byte) (Dealing,
 		return nil, err
 	}
 
-	// Recompute (C'ₖ, Eₖ) for all k.
+	// Recompute (C'ₖ, Eₖ) for all k ∈ { 0, 1, ..., N-1 }.
 	Cꞌ := make([][]Point, v.N)
 	E := make([]Ciphertext, v.N)
 	wʺ := make([]Polynomial, v.N)
+
+	i := 0 // index for ρ_wʺ and ρ_E
+	j := 0 // index for ρ_seed
 	for k, kInS := range S {
 		if kInS {
 			// if k ∈ S, parse ρₖ = ([ω"ₖ], Eₖ) and compute [C′ₖ] <-- g^[ω"ₖ] / [C].
-			if wʺ[k], E[k], err = v.unpackRho(ρ[k]); err != nil {
-				return nil, fmt.Errorf("invalid dealing (unpacking ρₖ failed): %w", err)
-			}
-			Cꞌ[k] = wʺ[k].Commitment(v.curve)
+			var wʺₖ math.Scalars = ρ_wʺ[i]
+			var Eₖ Ciphertext = ρ_E[i]
+			i++
+
+			wʺ[k], E[k] = wʺₖ, Eₖ
+			Cꞌ[k] = wʺₖ.Commitment(v.curve)
 			for j, Cj := range C {
 				Cꞌ[k][j].Subtract(Cꞌ[k][j], Cj)
 			}
 		} else {
 			// if k ∉ S, parse ρₖ = seedₖ and recompute ([C'ₖ], Eₖ) using the round function.
-			var seed [16]byte
-			if len(ρ[k]) != 16 {
-				return nil, fmt.Errorf("invalid dealing (ρₖ is not a valid seed)")
-			}
-			copy(seed[:], ρ[k])
-			if _, Cꞌ[k], E[k], err = v.round(to, ek, k, seed, ad); err != nil {
+			var seedₖ ExpansionSeed = ρ_seed[j]
+			j++
+
+			if _, Cꞌ[k], E[k], err = v.round(k, seedₖ, ad); err != nil {
 				return nil, err
 			}
 		}
 	}
 
 	// Recompute h <-- hComp(C'₁, E₁, ..., C'_N, E_N, ad) and compare to the original h.
-	hd, err := v.hComp(Cꞌ, E, ad)
-	if err != nil {
-		return nil, err
-	}
+	hd := v.hComp(Cꞌ, E, ad)
 	if subtle.ConstantTimeCompare(h, hd) != 1 {
 		return nil, fmt.Errorf("invalid dealing (hash mismatch)")
 	}
 
-	return &dealing{C, h, ρ, v.n, ad, S, wʺ, E}, nil
+	return &VerifiedDealing{*D}, nil
 }
 
 // Uses recipient R's secret key dk_(R_i) to decrypt its secret shares included the dealing.
 // Returns the secret share for recipient R, or an error if the decryption failed.
-func (v *vess) Decrypt(R PrivateIdentity, D Dealing) (Scalar, error) {
-	d := D.internal()
-	n, ad, wʺ, E := d.n, d.ad, d.wʺ, d.E
+func (v *vess) Decrypt(R int, dkᵢ dkgtypes.P256Keyring, D *VerifiedDealing, ad []byte) (Scalar, error) {
+	n := v.n
+	C, h, ρ_wʺ, ρ_E := D.c, D.h, D.ρ_wʺ, D.ρ_E
 
-	for k, kInS := range d.S {
+	S, err := v.hCh(C, h, ad)
+	if err != nil {
+		return nil, err
+	}
+
+	// index for ρ_wʺ and ρ_E
+	i := 0
+	for /* k */ _, kInS := range S {
 		if !kInS {
 			continue
 		}
 
-		sꞌ_R_bytes, err := mre.Decrypt(n+1, R, E[k], ad)
+		var wʺₖ math.Scalars = ρ_wʺ[i]
+		var Eₖ Ciphertext = ρ_E[i]
+		i++
+
+		sꞌ_R_bytes, err := mre.Decrypt(n+1, R, dkᵢ, Eₖ, ad)
 		if err != nil {
 			// For some iterations, the decryption may fail, this is okay and expected, we retry in another iteration.
 			// This could in principle also happen despite of a successful prior call to VerifyDealing, which only
@@ -263,7 +266,7 @@ func (v *vess) Decrypt(R PrivateIdentity, D Dealing) (Scalar, error) {
 		}
 
 		// Compute s_R <-- [w"ₖ](R) - s'_R
-		s_R := wʺ[k].Eval(R.XCoord()).Subtract(sꞌ_R)
+		s_R := wʺₖ.Eval(R).Subtract(sꞌ_R)
 
 		// Check whether g^(s_R) == [C]^(R)
 		if err = v.VerifyShare(s_R, D, R); err != nil {
@@ -280,28 +283,31 @@ func (v *vess) Decrypt(R PrivateIdentity, D Dealing) (Scalar, error) {
 	return nil, fmt.Errorf("decryption failed (no round passed verification check)")
 }
 
-func (v *vess) VerifyShare(s_R Scalar, D Dealing, R PublicIdentity) error {
-	d := D.internal()
-	C := d.C
+// Checks the validity of the share s_R for recipient R, given the dealing D.
+func (v *vess) VerifyShare(s_R Scalar, D *VerifiedDealing, R int) error {
+	if s_R == nil {
+		return fmt.Errorf("invalid share (nil)")
+	}
+	if !s_R.Modulus().Equal(v.curve.GroupOrder()) {
+		return fmt.Errorf("invalid share (scalar not of expected modulus)")
+	}
 
+	C := D.c
 	gᶺs_R := v.curve.Point().ScalarBaseMult(s_R) // Compute g^(s_R)
-	CᶺR := C.Eval(R.XCoord())                    // Compute [C]^(R)
+	CᶺR := C.Eval(R)
 	if !gᶺs_R.Equal(CᶺR) {
 		return fmt.Errorf("share verification failed: g^(s_R) != [C]^(R)")
 	}
 	return nil
 }
 
-func (v *vess) prepareEncryptionKeys(to []PublicIdentity) []P256PublicKey {
-	ek := make([]P256PublicKey, len(to)+1)
-	for j, identity := range to {
-		ek[j] = identity.PublicKey()
-	}
-	ek[len(to)] = v.crs
-	return ek
+// Returns the VESS instance parameters used, an (N, M) tuple.
+func (v *vess) Params() VESSParams {
+	return VESSParams{v.N, v.M}
 }
 
-func (v *vess) round(to []PublicIdentity, ek []P256PublicKey, k int, seedₖ ExpansionSeed, ad []byte) (wꞌₖ Polynomial, Cdk []Point, Ek Ciphertext, err error) {
+// Derives the polynomial wꞌₖ of degree t-1, its commitment Cꞌₖ, and the round k's MRE ciphertext Eₖ.
+func (v *vess) round(k int, seedₖ ExpansionSeed, ad []byte) (wꞌₖ Polynomial, Cꞌₖ []Point, Eₖ Ciphertext, err error) {
 	// Compute (rₖ, [w'ₖ]) <-- H_exp^t(k, seedₖ, ad)
 	var rₖ [16]byte
 	if rₖ, wꞌₖ, err = v.hExp(k, seedₖ, ad); err != nil {
@@ -309,57 +315,102 @@ func (v *vess) round(to []PublicIdentity, ek []P256PublicKey, k int, seedₖ Exp
 	}
 
 	// Compute [C'ₖ] <-- g^[w'ₖ]
-	Cdk = wꞌₖ.Commitment(v.curve)
+	Cꞌₖ = wꞌₖ.Commitment(v.curve)
 
 	// Compute [m] <-- [w'ₖ]([R]) || ⟨w'ₖ⟩
 	m := make([][]byte, v.n+1)
-	for i, recipient := range to {
-		m[i] = wꞌₖ.Eval(recipient.XCoord()).Bytes()
+	for i := 0; i < v.n; i++ {
+		m[i] = wꞌₖ.Eval(i).Bytes()
 	}
-	if m[v.n], err = wꞌₖ.Bytes(); err != nil {
+	if m[v.n], err = codec.Marshal(wꞌₖ); err != nil {
 		return
 	}
 
 	// Compute [Eₖ] <-- MRE.Enc([ek_R], [ω'ₖ]([R]), ad, rₖ)
-	Ek, err = mre.Encrypt(ek, m, ad, rₖ)
+	Eₖ, err = mre.Encrypt(v.ek, m, ad, rₖ)
 	return
 }
 
-// Return the serialized response ρₖ <-- ([ω"ₖ], Eₖ).
-func (v *vess) packRho(wʺₖ []Scalar, Eₖ Ciphertext) ([]byte, error) {
-	encoder := serialization.NewEncoder()
-	for _, w := range wʺₖ {
-		encoder.WriteBytes(w.Bytes())
+// Helper function to check if a given unverified dealing is well-formed (in the context of this VESS instance).
+// Cryptographic verification is performed in the VerifyDealing function.
+func (v *vess) validateDealing(D *UnverifiedDealing) error {
+	if D == nil {
+		return fmt.Errorf("invalid dealing (nil)")
 	}
-	encoder.WriteBytes(Eₖ)
-	return encoder.Bytes()
+
+	C, h, ρ_wʺ, ρ_E, ρ_seed := D.c, D.h, D.ρ_wʺ, D.ρ_E, D.ρ_seed
+
+	if err := v.validateCommitment(C); err != nil {
+		return err
+	}
+	if len(h) != digestSize {
+		return fmt.Errorf("invalid dealing (expected hash length: %d, got %d)", digestSize, len(h))
+	}
+	if err := v.validateResponses(ρ_wʺ, ρ_E, ρ_seed); err != nil {
+		return err
+	}
+
+	return nil
 }
 
-// Unpack ρₖ into the coefficients [w”ₖ] and the ciphertext Eₖ.
-func (v *vess) unpackRho(ρₖ []byte) ([]Scalar, Ciphertext, error) {
-	decoder := serialization.NewDecoder(ρₖ)
+// Helper for the well-formed check of a polynomial commitment (in the context of this VESS instance).
+func (v *vess) validateCommitment(C PolynomialCommitment) error {
+	if v.t != len(C) {
+		return fmt.Errorf("invalid dealing (expected commitment length: %d, got %d", v.t, len(C))
+	}
+	for _, Cₖ := range C {
+		if Cₖ == nil {
+			return fmt.Errorf("invalid dealing (nil point in commitment)")
+		}
+		if Cₖ.Curve() != v.curve {
+			return fmt.Errorf("invalid dealing (point in commitment not on expected curve")
+		}
+	}
+	return nil
+}
 
-	wʺₖ := make([]Scalar, v.t)
-	for i := 0; i < v.t; i++ {
-		var err error
-		if wʺₖ[i], err = v.curve.Scalar().SetBytes(decoder.ReadBytes()); err != nil {
-			return nil, nil, err
+// Helper for the well-formed check of the responses (in the context of this VESS instance).
+func (v *vess) validateResponses(ρ_wʺ [][]Scalar, ρ_E []Ciphertext, ρ_seed []ExpansionSeed) error {
+	t, N, M := v.t, v.N, v.M
+	if len(ρ_wʺ) != len(ρ_E) || len(ρ_wʺ) != M {
+		return fmt.Errorf(
+			"invalid dealing (expected number of ([ωʺₖ], Eₖ) responses: (%d, %d), got (%d, %d))",
+			M, M, len(ρ_wʺ), len(ρ_E),
+		)
+	}
+
+	for _, ρ_wʺᵢ := range ρ_wʺ {
+		if len(ρ_wʺᵢ) != t {
+			return fmt.Errorf("invalid dealing (expected polynomial degree: %d, got %d)", t-1, len(ρ_wʺᵢ)-1)
+		}
+		for _, s := range ρ_wʺᵢ {
+			if s == nil {
+				return fmt.Errorf("invalid dealing (nil scalar in polynomial)")
+			}
+			if !s.Modulus().Equal(v.curve.GroupOrder()) {
+				return fmt.Errorf("invalid dealing (scalar not of expected modulus)")
+			}
 		}
 	}
 
-	Eₖ := decoder.ReadBytes()
-
-	if err := decoder.Finish(); err != nil {
-		return nil, nil, err
+	for _, ρ_Eᵢ := range ρ_E {
+		if ρ_Eᵢ == nil {
+			return fmt.Errorf("invalid dealing (nil ciphertext in ([ωʺₖ], Eₖ) response)")
+		}
 	}
-	return wʺₖ, Eₖ, nil
+
+	if len(ρ_seed) != N-M {
+		return fmt.Errorf(
+			"invalid dealing (expected number of seed responses: %d, got %d)",
+			N-M, len(ρ_seed),
+		)
+	}
+	return nil
 }
 
 // Computes the hash hExp(t, k, seedₖ, ad).
 func (v *vess) hExp(k int, seedₖ ExpansionSeed, ad []byte) (ExpansionSeed, []Scalar, error) {
 	h := hash.NewHash("smartcontract.com/dkg/vess/hExp")
-	// TODO:
-	// 	 - h.WriteString(curve.Name())?
 	h.WriteInt(v.t)
 	h.WriteInt(k)
 	h.WriteBytes(seedₖ[:])
@@ -382,12 +433,12 @@ func (v *vess) hExp(k int, seedₖ ExpansionSeed, ad []byte) (ExpansionSeed, []S
 	return rₖ, wꞌₖ, nil
 }
 
-// Computes the hash hComp(Cd_1, E_1, , ..., Cd_N, E_N, ad).
-func (v *vess) hComp(Cd [][]Point, E []Ciphertext, ad []byte) ([]byte, error) {
+// Compute the hash hComp(C'₁, E₁, ..., C'_N, E_N, ad).
+func (v *vess) hComp(Cꞌ [][]Point, E []Ciphertext, ad []byte) []byte {
 	h := hash.NewHash("smartcontract.com/dkg/vess/hComp")
-	for i, Ci := range Cd {
-		for _, Cij := range Ci {
-			h.WriteBytes(Cij.Bytes())
+	for i, Cꞌᵢ := range Cꞌ {
+		for _, Cꞌᵢⱼ := range Cꞌᵢ {
+			h.WriteBytes(Cꞌᵢⱼ.Bytes())
 		}
 		h.WriteBytes(E[i])
 	}
@@ -395,7 +446,7 @@ func (v *vess) hComp(Cd [][]Point, E []Ciphertext, ad []byte) ([]byte, error) {
 	return h.Digest(digestSize)
 }
 
-// Derive a uniformly random selected subset S of size M from the set {0, 1, 2, ..., N-1} via a hash function.
+// Derive a uniformly random selected subset S of size M from the set { 0, 1, 2, ..., N-1 } via a hash function.
 // The set S is represented as a boolean array S of size N, where S[k] == true if k ∈ S, and S[k] == false otherwise.
 // The derivation is based on Fisher-Yates shuffle algorithm.
 //
@@ -405,8 +456,8 @@ func (v *vess) hCh(C []Point, h []byte, ad []byte) ([]bool, error) {
 	hasher := hash.NewHash("smartcontract.com/dkg/vess/hCh")
 	hasher.WriteInt(v.N)
 	hasher.WriteInt(v.M)
-	for _, Ci := range C {
-		hasher.WriteBytes(Ci.Bytes())
+	for _, Cᵢ := range C {
+		hasher.WriteBytes(Cᵢ.Bytes())
 	}
 	hasher.WriteBytes(h)
 	hasher.WriteBytes(ad)
@@ -440,156 +491,4 @@ func (v *vess) hCh(C []Point, h []byte, ad []byte) ([]bool, error) {
 		S[i] = permutation[i] < v.M
 	}
 	return S, nil
-}
-
-// Serializes this dealing into a byte slice for transmission over the network.
-func (d *dealing) Bytes() ([]byte, error) {
-	encoder := serialization.NewEncoder()
-	for _, Ci := range d.C {
-		encoder.WriteBytes(Ci.Bytes())
-	}
-	encoder.WriteBytes(d.h)
-	for _, r := range d.ρ {
-		encoder.WriteBytes(r)
-	}
-	return encoder.Bytes()
-}
-
-func (v *vess) loadDealing(D []byte) (*dealing, error) {
-	decoder := serialization.NewDecoder(D)
-
-	C := make([]Point, v.t)
-	for i := range C {
-		var err error
-		C[i], err = v.curve.Point().SetBytes(decoder.ReadBytes())
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode point C[%d]: %w", i, err)
-		}
-	}
-
-	h := decoder.ReadBytes()
-
-	ρ := make([][]byte, v.N)
-	for i := range ρ {
-		ρ[i] = decoder.ReadBytes()
-	}
-
-	if err := decoder.Finish(); err != nil {
-		return nil, err
-	}
-	return &dealing{C, h, ρ, 0, nil, nil, nil, nil}, nil
-}
-
-type candidateParams struct {
-	N           int
-	M           int
-	DealingSize int
-}
-
-// Computes a set of suitable parameters for the VESS protocol based on the given security level with different
-// trade-offs between compute cost and size of the dealing. The returned parameters are sorted by increasing compute
-// cost (N) and decreasing dealing size.
-func candidateParameters(curve math.Curve, n int, t int, statisticalSecurityBits int) []candidateParams {
-	// Checks if the parameter choices N and M are sufficient for the given security level.
-	achievesSecurityLevel := func(N, M int) bool {
-		choices := new(big.Int).Binomial(int64(N), int64(M))
-		return choices.BitLen() > statisticalSecurityBits
-	}
-
-	// Determine the initial parameters N and M that are sufficient for the security level.
-	N, M := 2, 1
-	for !achievesSecurityLevel(N, M) {
-		N += 2
-		M += 1
-	}
-	for achievesSecurityLevel(N, M-1) {
-		M--
-	}
-
-	minDealingSize := dealingSize(curve, n, t, N, M)
-
-	params := make([]candidateParams, 0)
-	params = append(params, candidateParams{N, M, minDealingSize})
-
-	for {
-		N++
-		if !achievesSecurityLevel(N, M-1) {
-			continue
-		}
-		M--
-		for achievesSecurityLevel(N, M-1) {
-			M--
-		}
-
-		currentDealingSize := dealingSize(curve, n, t, N, M)
-		if currentDealingSize > minDealingSize {
-			break
-		}
-
-		minDealingSize = currentDealingSize
-		params = append(params, candidateParams{N, M, currentDealingSize})
-	}
-
-	return params
-}
-
-// Selects the optimal parameters from the given candidates based on the computeWeight.
-// The computeWeight is a value in the range [0.0, 1.0] that determines the weight of the compute cost relative to the
-// size of the dealing. A value of 0.0 means that the size is the only factor, while a value of 1.0 means that the
-// compute cost is the only factor. Only pass results from candidateParameters() to this function, the function assumes
-// that the candidates are sorted by increasing N / decreasing dealing size.
-func selectOptimalParameters(params []candidateParams, computeWeight float64) candidateParams {
-	if computeWeight < 0.0 || computeWeight > 1.0 {
-		panic("computeWeight must be in the range [0.0, 1.0], got: " + fmt.Sprint(computeWeight))
-	}
-
-	minN := params[0].N
-	minDealingSize := params[0].DealingSize
-
-	minWeight := stdmath.MaxFloat64
-	bestParams := candidateParams{}
-
-	for _, p := range params {
-		computeMultiplier := float64(p.N) / float64(minN)
-		sizeMultiplier := float64(p.DealingSize) / float64(minDealingSize)
-		weight := (computeMultiplier * computeWeight) + (sizeMultiplier * (1 - computeWeight))
-
-		if weight < minWeight {
-			minWeight = weight
-			bestParams = p
-		}
-	}
-	return bestParams
-}
-
-// Returns the size of a serialized dealing.
-func dealingSize(curve math.Curve, n int, t int, N int, M int) int {
-	encodedSizeOf := serialization.SizeOfEncodedBytesByLength
-
-	// Commitment vector C, containing t points
-	size := encodedSizeOf(curve.PointBytes()) * t
-
-	// Size of the hash h
-	size += encodedSizeOf(digestSize)
-
-	// Size of ρₖ:
-	// a) if k ∈ S, ρₖ = ([ω"ₖ], Eₖ) where [ω"ₖ] is a polynomial of degree t-1, and Eₖ is a ciphertext
-	// b) if k ∉ S, ρₖ = seedₖ
-
-	plaintextSizes := make([]int, n+1)
-	for i := 0; i < n; i++ {
-		plaintextSizes[i] = curve.ScalarBytes()
-	}
-	polySize := encodedSizeOf(curve.ScalarBytes()) * t
-	plaintextSizes[n] = polySize
-
-	ciphertextSize := encodedSizeOf(mre.CiphertextSize(plaintextSizes))
-
-	ρA := encodedSizeOf(polySize + ciphertextSize)
-	ρB := serialization.SizeOfEncodedBytesByLength(expansionSeedSize)
-
-	size += M * ρA
-	size += (N - M) * ρB
-
-	return size
 }

@@ -3,16 +3,14 @@ package dummydkg
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	"io"
-
-	unsafeRand "math/rand"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
 	"github.com/smartcontractkit/smdkg/internal/dkgtypes"
 	"github.com/smartcontractkit/smdkg/internal/math"
+	"github.com/smartcontractkit/smdkg/internal/testimplementations/unsaferand"
 )
 
 var _ dkgocrtypes.P256Keyring = &P256Keyring{}
@@ -26,7 +24,12 @@ func (kr *P256Keyring) ECDH(publicKey dkgocrtypes.P256ParticipantPublicKey) (dkg
 	if err != nil {
 		return nil, err
 	}
-	return kr.keypair.SecretKey.ECDH(pk)
+
+	sharedSecret, err := kr.keypair.SecretKey.ECDH(pk)
+	if err != nil {
+		return nil, err
+	}
+	return dkgocrtypes.P256ECDHSharedSecret(sharedSecret), nil
 }
 
 func (kr *P256Keyring) PublicKey() dkgocrtypes.P256ParticipantPublicKey {
@@ -49,8 +52,7 @@ func Setup(n, t int, seed string) (
 	error,
 ) {
 	// Setup a deterministic random number generator based on the instance ID.
-	rand := randFromSeed(seed)
-	seed = fmt.Sprintf("DummyDKG(n=%d, t=%d, seed=%v)", n, t, seed)
+	rand := unsaferand.New("DummyDKG-Setup", seed, n, t)
 
 	// Generate a unique instance ID based on the seed.
 	// This is a placeholder!
@@ -122,8 +124,7 @@ func NewResultPackage(iid dkgocrtypes.InstanceID, config dkgocrtypes.ReportingPl
 	msks := make([]math.Scalar, n)
 	mpks := make([]math.Point, n)
 	for i := 0; i < n; i++ {
-		x := curve.Scalar().SetUint(uint(i + 1))
-		msks[i] = poly.Eval(x)
+		msks[i] = poly.Eval(i)
 		mpks[i] = curve.Point().ScalarBaseMult(msks[i])
 	}
 
@@ -165,11 +166,4 @@ func (r *ResultPackage) MarshalBinary() (data []byte, err error) {
 
 func (r *ResultPackage) UnmarshalBinary(data []byte) error {
 	panic("not implemented")
-}
-
-// Sets up a deterministic random number generator based on a seed string.
-func randFromSeed(seed string) io.Reader {
-	sum := sha256.Sum256([]byte(seed))
-	seedInt := int64(binary.LittleEndian.Uint64(sum[:8])) // take first 8 bytes
-	return unsafeRand.New(unsafeRand.NewSource(seedInt))
 }

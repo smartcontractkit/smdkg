@@ -9,6 +9,7 @@ import (
 	ocr2ptypes "github.com/smartcontractkit/libocr/offchainreporting2plus/types"
 
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
+	"github.com/smartcontractkit/smdkg/dkgocr/internal/plugin"
 )
 
 var _ ocr3types.ContractTransmitter[struct{}] = &Transmitter{}
@@ -19,7 +20,6 @@ type Transmitter struct {
 }
 
 // Transmit sends the report to the on-chain smart contract's Transmit method.
-// This is a dummy implementation that does nothing.
 func (t *Transmitter) Transmit(
 	ctx context.Context,
 	configDigest types.ConfigDigest,
@@ -29,20 +29,18 @@ func (t *Transmitter) Transmit(
 ) error {
 	// no need to check signatures since libocr already handled that for us
 
-	var dealingPackage dkgocrtypes.ResultPackage
-
-	_ = dealingPackage
-
 	// unmarshal report into dealingPackage
-	// write to entry to t.DealingPackageDatabase that maps
-	// dealingPackage.InstanceID() -> {
-	//   configDigest,
-	//   seqNr,
-	//   report,
-	//   signatures,
-	// }
+	dealingPackage := &plugin.ResultPackage{}
+	err := dealingPackage.UnmarshalBinary(report.Report)
+	if err != nil {
+		return fmt.Errorf("unmarshal dealing package: %w", err)
+	}
 
-	panic("not implemented yet")
+	// prepare database value
+	value := dkgocrtypes.ResultPackageDatabaseValue{configDigest, seqNr, report.Report, signatures}
+
+	// write to entry to t.DealingPackageDatabase
+	return t.DealingPackageDatabase.WriteResultPackage(ctx, dealingPackage.InstanceID(), value)
 }
 
 // We use the offchain public key as the "transmitter" account, formatted as an Ethereum address for compatibility the

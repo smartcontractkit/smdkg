@@ -1,8 +1,11 @@
 package math
 
 import (
+	"fmt"
+
 	"filippo.io/edwards25519"
 	"filippo.io/nistec"
+	"github.com/smartcontractkit/smdkg/internal/codec"
 )
 
 var SupportedCurves = []Curve{
@@ -54,17 +57,23 @@ var P384 = &p384Curve{}
 var P521 = &p521Curve{}
 var Edwards25519 = &edwards25519Curve{}
 
+func (c *p224Curve) internal()         {}
+func (c *p256Curve) internal()         {}
+func (c *p384Curve) internal()         {}
+func (c *p521Curve) internal()         {}
+func (c *edwards25519Curve) internal() {}
+
 func (c *p224Curve) Name() string         { return "P224" }
 func (c *p256Curve) Name() string         { return "P256" }
 func (c *p384Curve) Name() string         { return "P384" }
 func (c *p521Curve) Name() string         { return "P521" }
 func (c *edwards25519Curve) Name() string { return "Edwards25519" }
 
-func (c *p224Curve) GroupOrder() Modulus         { return p224GroupOrder }
-func (c *p256Curve) GroupOrder() Modulus         { return p256GroupOrder }
-func (c *p384Curve) GroupOrder() Modulus         { return p384GroupOrder }
-func (c *p521Curve) GroupOrder() Modulus         { return p521GroupOrder }
-func (c *edwards25519Curve) GroupOrder() Modulus { return edwards25519GroupOrder }
+func (c *p224Curve) GroupOrder() *Modulus         { return p224GroupOrder }
+func (c *p256Curve) GroupOrder() *Modulus         { return p256GroupOrder }
+func (c *p384Curve) GroupOrder() *Modulus         { return p384GroupOrder }
+func (c *p521Curve) GroupOrder() *Modulus         { return p521GroupOrder }
+func (c *edwards25519Curve) GroupOrder() *Modulus { return edwards25519GroupOrder }
 
 func (c *p224Curve) Scalar() Scalar         { return NewScalar(p224GroupOrder) }
 func (c *p256Curve) Scalar() Scalar         { return NewScalar(p256GroupOrder) }
@@ -97,3 +106,38 @@ func (c *p256Curve) PointBytes() int         { return p256CompressedLength }
 func (c *p384Curve) PointBytes() int         { return p384CompressedLength }
 func (c *p521Curve) PointBytes() int         { return p521CompressedLength }
 func (c *edwards25519Curve) PointBytes() int { return edwards25519CompressedLength }
+
+func (c *p224Curve) MarshalTo(target codec.Target) { target.WriteBytes([]byte{curveToIndex(c)}) }
+func (c *p256Curve) MarshalTo(target codec.Target) { target.WriteBytes([]byte{curveToIndex(c)}) }
+func (c *p384Curve) MarshalTo(target codec.Target) { target.WriteBytes([]byte{curveToIndex(c)}) }
+func (c *p521Curve) MarshalTo(target codec.Target) { target.WriteBytes([]byte{curveToIndex(c)}) }
+func (c *edwards25519Curve) MarshalTo(target codec.Target) {
+	target.WriteBytes([]byte{curveToIndex(c)})
+}
+
+func UnmarshalCurve(src codec.Source) Curve {
+	var index [1]byte
+	src.ReadBytesInto(index[:])
+	if int(index[0]) >= len(SupportedCurves) {
+		panic(fmt.Sprintf("curve lookup failed, index: %d", index))
+	}
+	return SupportedCurves[index[0]]
+}
+
+func CurveByName(name string) Curve {
+	for _, curve := range SupportedCurves {
+		if curve.Name() == name {
+			return curve
+		}
+	}
+	return nil
+}
+
+func curveToIndex(curve Curve) byte {
+	for i, c := range SupportedCurves {
+		if c == curve {
+			return byte(i)
+		}
+	}
+	panic("curve not found in SupportedCurves")
+}

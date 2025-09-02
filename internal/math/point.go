@@ -1,6 +1,10 @@
 package math
 
+import "github.com/smartcontractkit/smdkg/internal/codec"
+
 type Point interface {
+	codec.Codec[Point]
+
 	// v.Curve() returns the point's underlying elliptic curve.
 	Curve() Curve
 

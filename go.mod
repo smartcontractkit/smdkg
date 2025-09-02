@@ -7,6 +7,7 @@ require (
 	github.com/prometheus/client_golang v1.23.0
 	github.com/smartcontractkit/libocr v0.0.0-20250707144819-babe0ec4e358
 	github.com/smartcontractkit/tdh2/go/tdh2 v0.0.0-20250624150019-e49f7e125e6b
+	github.com/stretchr/testify v1.10.0
 )
 
 require (
@@ -26,7 +27,11 @@ require (
 require (
 	filippo.io/bigmod v0.1.0
 	filippo.io/edwards25519 v1.1.0
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/ethereum/go-ethereum v1.16.2
-	golang.org/x/crypto v0.36.0 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/sirupsen/logrus v1.9.3
+	golang.org/x/crypto v0.36.0
 	golang.org/x/sys v0.33.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -5,17 +5,25 @@ import (
 	"fmt"
 
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
+	"github.com/smartcontractkit/smdkg/internal/codec"
 	"github.com/smartcontractkit/smdkg/internal/dkg"
 	"github.com/smartcontractkit/smdkg/internal/dkgtypes"
-	"github.com/smartcontractkit/smdkg/internal/math"
-	"github.com/smartcontractkit/smdkg/internal/serialization"
 )
 
 var _ dkgocrtypes.ResultPackage = &ResultPackage{}
 
 type ResultPackage struct {
 	inner  dkg.Result
-	config dkgocrtypes.ReportingPluginConfig
+	config *dkgocrtypes.ReportingPluginConfig
+}
+
+func (r *ResultPackage) MarshalBinary() ([]byte, error) {
+	return codec.Marshal(r)
+}
+
+func (r *ResultPackage) UnmarshalBinary(data []byte) error {
+	r, err := codec.Unmarshal(data, r)
+	return err
 }
 
 func (r *ResultPackage) InstanceID() dkgocrtypes.InstanceID {
@@ -56,15 +64,10 @@ func (r *ResultPackage) MasterSecretKeyShare(keyring dkgocrtypes.P256Keyring) (d
 	}
 
 	// Create a recipient identity for the index / keyring's public key combination.
-	R := &recipientIdentity{
-		keyring,
-		parsedPublicKey,
-		index,
-		r.inner.Curve().Scalar().SetUint(uint(index + 1)), // we always use index + 1 for the X coordinate
-	}
+	wrappedKeyring := &wrappedP256keyring{keyring, parsedPublicKey}
 
 	// Retrieve the master secret key share for the recipient (in its internal representation).
-	keyShareScalar, err := r.inner.MasterSecretKeyShare(R)
+	keyShareScalar, err := r.inner.MasterSecretKeyShare(index, wrappedKeyring)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt master secret key share: %w", err)
 	}
@@ -82,50 +85,30 @@ func (r *ResultPackage) MasterSecretKeyShare(keyring dkgocrtypes.P256Keyring) (d
 }
 
 func (r *ResultPackage) ReportingPluginConfig() dkgocrtypes.ReportingPluginConfig {
-	return r.config
-}
-
-func (r *ResultPackage) MarshalBinary() ([]byte, error) {
-	encoder := serialization.NewEncoder()
-	data, err := r.config.MarshalBinary()
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal reporting plugin config: %w", err)
-	}
-	encoder.WriteBytes(data)
-
-	// TODO:
-	// encoder.WriteBytes(r.inner....())
-
-	panic("unimplemented")
-}
-
-func (r *ResultPackage) UnmarshalBinary(data []byte) error {
-	panic("unimplemented")
+	return *r.config
 }
 
 // Wrapper implementation of the dkgtypes.PrivateIdentity interface using a provided P-256 keyring.
-var _ dkgtypes.PrivateIdentity = &recipientIdentity{}
+var _ dkgtypes.P256Keyring = &wrappedP256keyring{}
 
-type recipientIdentity struct {
+type wrappedP256keyring struct {
 	keyring   dkgocrtypes.P256Keyring
 	publicKey dkgtypes.P256PublicKey
-	index     int
-	xCoord    math.Scalar
 }
 
-func (id *recipientIdentity) Index() int {
-	return id.index
+func newWrappedP256Keyring(keyring dkgocrtypes.P256Keyring) (*wrappedP256keyring, error) {
+	pk, err := dkgtypes.NewP256PublicKey(keyring.PublicKey())
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive public key: %w", err)
+	}
+	return &wrappedP256keyring{keyring, pk}, nil
 }
 
-func (id *recipientIdentity) XCoord() math.Scalar {
-	return id.xCoord
-}
-
-func (id *recipientIdentity) PublicKey() dkgtypes.P256PublicKey {
+func (id *wrappedP256keyring) PublicKey() dkgtypes.P256PublicKey {
 	return id.publicKey
 }
 
-func (id *recipientIdentity) ECDH(remotePublicKey dkgtypes.P256PublicKey) ([]byte, error) {
+func (id *wrappedP256keyring) ECDH(remotePublicKey dkgtypes.P256PublicKey) (dkgtypes.P256ECDHSharedSecret, error) {
 	rpk := remotePublicKey.Bytes()
 
 	if len(rpk) != dkgocrtypes.P256ParticipantPublicKeyLength {
@@ -145,5 +128,5 @@ func (id *recipientIdentity) ECDH(remotePublicKey dkgtypes.P256PublicKey) ([]byt
 			len(sharedSecret), dkgocrtypes.P256ECDHSharedSecretLength,
 		)
 	}
-	return sharedSecret, nil
+	return dkgtypes.P256ECDHSharedSecret(sharedSecret), nil
 }
