@@ -9,13 +9,13 @@ import (
 var _ codec.Codec[*pluginState] = &pluginState{}
 
 func (s *pluginState) MarshalTo(target codec.Target) {
-	target.WriteInt(int(s.stateMachineState))
-	target.WriteInt(s.countRestart)
+	target.WriteInt(int(s.state))
+	target.WriteInt(s.attempt)
 }
 
 func (s *pluginState) UnmarshalFrom(source codec.Source) *pluginState {
-	s.stateMachineState = stateMachineState(source.ReadInt())
-	s.countRestart = source.ReadInt()
+	s.state = stateMachineState(source.ReadInt())
+	s.attempt = source.ReadInt()
 	return s
 }
 

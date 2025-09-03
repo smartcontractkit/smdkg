@@ -17,7 +17,7 @@ import (
 type UnverifiedDealing struct {
 	c      PolynomialCommitment // len(c) == t (not using uppercase C here to avoid exporting the value)
 	h      []byte               // len(h) == digestSize
-	ρ_wʺ   [][]math.Scalar      // only set for k ∈ S, len(ρ_wʺ) == M, len(ρ_wʺ[i]) == t
+	ρ_ωʺ   [][]math.Scalar      // only set for k ∈ S, len(ρ_wʺ) == M, len(ρ_wʺ[i]) == t
 	ρ_E    []Ciphertext         // only set for k ∈ S, len(ρ_E) == M
 	ρ_seed []ExpansionSeed      // only set for k ∉ S, len(ρ_seed) == N-M
 }
@@ -33,10 +33,10 @@ func (d *UnverifiedDealing) IsNil() bool {
 }
 
 func (d *UnverifiedDealing) MarshalTo(target codec.Target) {
-	if len(d.ρ_wʺ) != len(d.ρ_E) {
+	if len(d.ρ_ωʺ) != len(d.ρ_E) {
 		panic(fmt.Sprintf(
 			"dealing.MarshalTo: inconsistent number of values in ρ_wʺ (%d) and ρ_E (%d)",
-			len(d.ρ_wʺ), len(d.ρ_E),
+			len(d.ρ_ωʺ), len(d.ρ_E),
 		))
 	}
 
@@ -44,8 +44,8 @@ func (d *UnverifiedDealing) MarshalTo(target codec.Target) {
 	curve := C[0].Curve()
 
 	t := len(d.c)
-	N := len(d.ρ_wʺ) + len(d.ρ_seed)
-	M := len(d.ρ_wʺ)
+	N := len(d.ρ_ωʺ) + len(d.ρ_seed)
+	M := len(d.ρ_ωʺ)
 
 	curve.MarshalTo(target)
 	target.WriteInt(t)
@@ -58,8 +58,8 @@ func (d *UnverifiedDealing) MarshalTo(target codec.Target) {
 
 	target.WriteBytes(d.h)
 
-	for i := range d.ρ_wʺ {
-		for _, w := range d.ρ_wʺ[i] {
+	for i := range d.ρ_ωʺ {
+		for _, w := range d.ρ_ωʺ[i] {
 			w.MarshalTo(target)
 		}
 		target.WriteLengthPrefixedBytes(d.ρ_E[i])
@@ -89,15 +89,15 @@ func (d *UnverifiedDealing) UnmarshalFrom(source codec.Source) *UnverifiedDealin
 
 	d.h = source.ReadBytes(digestSize)
 
-	d.ρ_wʺ = make([][]math.Scalar, M)
+	d.ρ_ωʺ = make([][]math.Scalar, M)
 	d.ρ_E = make([]Ciphertext, M)
-	for i := range d.ρ_wʺ {
+	for i := range d.ρ_ωʺ {
 		ρ_wʺ := make([]math.Scalar, t)
 		for j := range ρ_wʺ {
 			ρ_wʺ[j] = curve.Scalar()
 			ρ_wʺ[j].UnmarshalFrom(source)
 		}
-		d.ρ_wʺ[i] = ρ_wʺ
+		d.ρ_ωʺ[i] = ρ_wʺ
 		d.ρ_E[i] = source.ReadLengthPrefixedBytes()
 	}
 

@@ -31,7 +31,6 @@ func OCR3_1OracleArgsForSanMarinoDKG(
 	dealingResultPackageDatabase dkgocrtypes.ResultPackageDatabase,
 	configContractAddress common.Address,
 ) offchainreporting2plus.OCR3_1OracleArgs[struct{}] {
-
 	return offchainreporting2plus.OCR3_1OracleArgs[struct{}]{
 		binaryNetworkEndpointFactory,
 		v2Bootstrappers,

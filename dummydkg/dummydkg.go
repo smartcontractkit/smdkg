@@ -8,41 +8,10 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
-	"github.com/smartcontractkit/smdkg/internal/dkgtypes"
 	"github.com/smartcontractkit/smdkg/internal/math"
 	"github.com/smartcontractkit/smdkg/internal/testimplementations/unsaferand"
+	"github.com/smartcontractkit/smdkg/p256keyring"
 )
-
-var _ dkgocrtypes.P256Keyring = &P256Keyring{}
-
-type P256Keyring struct {
-	keypair dkgtypes.P256KeyPair
-}
-
-func (kr *P256Keyring) ECDH(publicKey dkgocrtypes.P256ParticipantPublicKey) (dkgocrtypes.P256ECDHSharedSecret, error) {
-	pk, err := dkgtypes.NewP256PublicKey(publicKey)
-	if err != nil {
-		return nil, err
-	}
-
-	sharedSecret, err := kr.keypair.SecretKey.ECDH(pk)
-	if err != nil {
-		return nil, err
-	}
-	return dkgocrtypes.P256ECDHSharedSecret(sharedSecret), nil
-}
-
-func (kr *P256Keyring) PublicKey() dkgocrtypes.P256ParticipantPublicKey {
-	return kr.keypair.PublicKey.Bytes()
-}
-
-func NewP256Keyring(rand io.Reader) (dkgocrtypes.P256Keyring, error) {
-	kp, err := dkgtypes.NewP256KeyPair(rand)
-	if err != nil {
-		return nil, err
-	}
-	return &P256Keyring{kp}, nil
-}
 
 func Setup(n, t int, seed string) (
 	dkgocrtypes.InstanceID,
@@ -64,9 +33,10 @@ func Setup(n, t int, seed string) (
 	// Initialize keyrings for all participants.
 	recipientKeyrings := make([]dkgocrtypes.P256Keyring, n)
 	for i := 0; i < n; i++ {
-		recipientKeyring, err := NewP256Keyring(rand)
+		recipientKeyring, err := p256keyring.New(rand)
 		if err != nil {
-			return "", dkgocrtypes.ReportingPluginConfig{}, nil, nil, fmt.Errorf("failed to create keyring for participant %d: %w", i, err)
+			err = fmt.Errorf("failed to create keyring for participant %d: %w", i, err)
+			return "", dkgocrtypes.ReportingPluginConfig{}, nil, nil, err
 		}
 		recipientKeyrings[i] = recipientKeyring
 	}

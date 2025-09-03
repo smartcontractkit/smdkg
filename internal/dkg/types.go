@@ -157,11 +157,15 @@ func (r *result) Curve() math.Curve {
 }
 
 func (r *result) MasterPublicKey() math.Point {
-	return r.y
+	return r.y.Clone()
 }
 
 func (r *result) MasterPublicKeyShares() []math.Point {
-	return r.y_R
+	y_R := make([]math.Point, len(r.y_R))
+	for i, yᵢ := range r.y_R {
+		y_R[i] = yᵢ.Clone()
+	}
+	return y_R
 }
 
 func (r *result) MasterSecretKeyShare(R int, dk_R dkgtypes.P256Keyring) (math.Scalar, error) {

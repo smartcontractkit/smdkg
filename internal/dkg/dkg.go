@@ -32,7 +32,7 @@ type DKG interface {
 	// start to decrypt their decryption shares, corresponds to |L|. This parameter depends on whether this DKG is
 	// configured for fresh sharing or re-sharing:
 	//   - fresh sharing: |L| = f_D + 1, i.e., at least f_D + 1 valid initial dealings must be collected
-	//   - re-sharing:    |L| = t_R,     i.e., at least t_R     valid initial dealings must be collected
+	//   - re-sharing:    |L| = priorResult.t_R, i.e., at least priorResult.t_R valid initial dealings must be collected
 	DealingsThreshold() int
 
 	// Indicates how many decryption shares must be collected by the plugin before the inner dealings case be recovered.
@@ -42,7 +42,7 @@ type DKG interface {
 	// configured for re-sharing, s_D from the prior DKG's result is used. Otherwise s_D is initialized as a fresh
 	// random secret. The result is composed of two parts:
 	//   - the outer dealing OD_D, sharing a random secret z_D (used as encryption key) with the dealers D,
-	//   - the encrypted inner dealing EID_D, i.e., ID_D ((re-)sharing s_D with the recipients R), encrypted with z_D.'
+	//   - the encrypted inner dealing EID_D, i.e., ID_D ((re-)sharing s_D with the recipients R), encrypted with z_D.
 	Deal(rand io.Reader) (VerifiedInitialDealing, error)
 
 	// After the initial step of creating and broadcasting all initial dealings, each dealer D must verify the initial
@@ -51,15 +51,16 @@ type DKG interface {
 	VerifyInitialDealing(initialDealing UnverifiedInitialDealing, Dꞌ int) (VerifiedInitialDealing, error)
 
 	// Decrypts all outer dealings OD_Dꞌ the dealer D' (issuer) ∈ L created and broadcasted for dealer D (recipient).
-	// For decryption, the stored reference the keyring of dealer D is used. Returns the list of decryption key shares
-	// z_{D', D} for all D' ∈ L. The result z_{D', D} is given as list of length n_D, with nil values for all D' ∉ L.
+	// For decryption, the stored reference to the keyring of dealer D is used. Returns the list of decryption key
+	// shares z_{D', D} for all D' ∈ L. The result z_{D', D} is given as list of length n_D, with nil values for all
+	// D' ∉ L.
 	//
 	// Executed when the dealer D successfully collected a list L of
 	//   - f_D + 1 valid initial dealings (for a fresh DKG run) or
 	//   - t_D     valid initial dealings (for a re-sharing DKG run).
 	//
 	// The initial dealings in L must be from different dealers Dꞌ, and must have been verified successfully. This list
-	// of initial dealings L must be given as list of length n_D, containing exactly f_D+1 / t_D non-nil values.
+	// of initial dealings L must be given as a list of length n_D, containing exactly f_D+1 / t_D non-nil values.
 	DecryptDecryptionKeyShares(L []VerifiedInitialDealing) (VerifiedDecryptionKeySharesForInnerDealing, error)
 
 	// Executed when some dealer D wants to verify the decryption key shares (z_{D', D*}) the dealer D* (=Dˣ below)
@@ -108,7 +109,7 @@ type dkg struct {
 //   - t_R: the reconstruction threshold, i.e., the minimum number of new recipients' shares needed for deriving the
 //     master secret
 //
-// Returns a new DKG instance for the use with the DKG plugin.
+// Returns a new DKG instance for use with the DKG plugin.
 // Initialization may fail, e.g., if a given public key cannot be unmarshaled correctly.
 func NewInitialDKG(
 	iid dkgtypes.InstanceID,
@@ -125,17 +126,15 @@ func NewInitialDKG(
 // Initializes a new (stateless) DKG instance for the given instance ID, to re-share the master secret key, previously
 // set up via a (fresh or re-shared) DKG instance to a (potentially) different list of recipients.
 //
-// Various parameters are determined by the prior instance's result:
-//   - the use elliptic curve
-//   - the dealer configuration and public keys, i.e., the new dealers are the old recipients.
-//
 // Parameters:
 //   - iid: the instance ID of the new DKG instance
+//   - dealers: the public keys of the dealers (the nodes running the DKG protocol, must match the prior result's recipients)
 //   - recipients: the public keys of the new recipients
+//   - f_D: the maximum number of faulty dealers to be tolerated while executing the DKG protocol
 //   - t_R: the reconstruction threshold, i.e., the minimum number of new recipients' shares needed for deriving the
 //     master secret
-//   - priorResult: the result of the prior DKG instance, determines the underlying secrets to be re-shared
 //   - keyring: the keyring is required to load a private key share of the master secret key for re-sharing
+//   - priorResult: the result of the prior DKG instance, determines the underlying secrets to be re-shared
 //
 // Returns a new DKG instance for the use with the DKG plugin.
 // Initialization may fail, e.g., if a given public key cannot be unmarshaled correctly.
@@ -146,9 +145,9 @@ func NewResharingDKG(
 	f_D int,
 	t_R int,
 	keyring dkgtypes.P256Keyring,
-	prior Result,
+	priorResult Result,
 ) (DKG, error) {
-	return newDKG(iid, prior.Curve(), dealers, recipients, f_D, t_R, keyring, prior)
+	return newDKG(iid, priorResult.Curve(), dealers, recipients, f_D, t_R, keyring, priorResult)
 }
 
 func newDKG(
@@ -489,7 +488,7 @@ func (dkg *dkg) encryptInnerDealing(ID_D *vess.VerifiedDealing, z_D math.Scalar)
 	// from (iid, D, z_D).
 	D := dkg.dealerIndex
 	otp := hDeal(dkg.iid, D, z_D, len(ID_D_bytes))
-	dst := otp
+	dst := otp // re-use the otp slice the dst buffer for the result
 	if subtle.XORBytes(dst, ID_D_bytes, otp) != len(ID_D_bytes) {
 		return nil, fmt.Errorf("failed to encrypt inner dealing package")
 	}

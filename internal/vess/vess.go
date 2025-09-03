@@ -32,10 +32,10 @@ type ExpansionSeed = [expansionSeedSize]byte
 type VESS interface {
 	internal() *vess
 
-	// Deal generates a VESS dealing for the secret s, with the polynomial degree t - 1, for N recipients with
-	// identities R. `nil` may be passed as value for R, in which case the default identities {1, 2, ..., N} are used.
-	// The encryption keys for the recipients are provided in ekR, and additional associated data is provided in ad.
-	// The function returns the a serialized dealing containing:
+	// Deal generates a VESS dealing for the secret s, with the polynomial degree t - 1, for n recipients.
+	// The set of recipients R (with their encryption keys) is set upon initialization of the VESS instance.
+	// Additional associated data is provided in ad.
+	// The function returns a VerifiedDealing containing:
 	//  - the commitment vector C,
 	//  - the hash h,
 	//  - and the ρ vector (forming the ZKP).
@@ -46,11 +46,11 @@ type VESS interface {
 	VerifyDealing(D *UnverifiedDealing, ad []byte) (*VerifiedDealing, error)
 
 	// Given the VESS dealing D, decrypt the secret share for recipient R using its keyring for operations against R's
-	// secret key dk_R.
+	// secret key dk_R (abstracted in the provided dkgtypes.P256Keyring interface).
 	Decrypt(R int, dk_R dkgtypes.P256Keyring, D *VerifiedDealing, ad []byte) (Scalar, error)
 
 	// Verifies the validity of the share s_R for recipient R, given the dealing D.
-	// Returns nil if the share is valid, or an error if the share is invalid.
+	// Returns nil if the share s_R is valid, or an error if the share is invalid.
 	VerifyShare(s_R Scalar, D *VerifiedDealing, R int) error
 
 	// Returns the VESS instance parameters used, an (N, M) tuple.
@@ -74,8 +74,8 @@ type VESSParams struct {
 }
 
 // Initialize a new VESS instance for the given curve and DKG instance id.
-// The DKG instance id is used to derive the common reference string (CRS) for the VESS & MRE protocol.
-// When initializing a VESS instance for decryption only, `nil` may be passed as value for recipients.
+// The DKG's InstanceID is used to derive the common reference string (CRS) for the VESS & MRE protocol.
+// When initializing a VESS instance for decryption only, `nil` may be passed as value for the list of recipients.
 func NewVESS(curve math.Curve, iid dkgtypes.InstanceID, tag string, n int, t int, recipients []dkgtypes.P256PublicKey) (VESS, error) {
 	if t <= 0 || n <= 0 || n < t {
 		return nil, fmt.Errorf("invalid parameters n (%d) and t (%d)", n, t)
@@ -117,30 +117,25 @@ func (v *vess) Deal(s Scalar, ad []byte, rand io.Reader) (*VerifiedDealing, erro
 	}
 
 	// Initialize the coefficients of a random polynomial ω(x) of degree t - 1, its 1st coefficient is set to s.
-	w, err := math.RandomPolynomial(s, v.t, rand)
+	ω, err := math.RandomPolynomial(s, v.t, rand)
 	if err != nil {
 		return nil, err
 	}
 
-	// Commit to that polynomial, i.e. compute [C] <- g^[w]
-	C := w.Commitment(v.curve)
+	// Commit to that polynomial, i.e. compute [C] <- g^[ω]
+	C := ω.Commitment(v.curve)
 
 	seed := make([]ExpansionSeed, v.N)
 	Cꞌ := make([][]Point, v.N)
 	E := make([]Ciphertext, v.N)
-	wꞌ := make([][]Scalar, v.N)
-	wʺ := make([]math.Polynomial, v.N)
-
-	ρ_wʺ := make([][]math.Scalar, 0, v.M)
-	ρ_E := make([]Ciphertext, 0, v.M)
-	ρ_seed := make([]ExpansionSeed, 0, v.N-v.M)
+	ωꞌ := make([]math.Polynomial, v.N)
 
 	for k := 0; k < v.N; k++ {
 		// Generate a random expansion seedₖ.
 		if _, err := io.ReadFull(rand, seed[k][:]); err != nil {
 			return nil, err
 		}
-		if wꞌ[k], Cꞌ[k], E[k], err = v.round(k, seed[k], ad); err != nil {
+		if ωꞌ[k], Cꞌ[k], E[k], err = v.zkpCommitRound(k, seed[k], ad); err != nil {
 			return nil, err
 		}
 	}
@@ -155,11 +150,17 @@ func (v *vess) Deal(s Scalar, ad []byte, rand io.Reader) (*VerifiedDealing, erro
 		return nil, err
 	}
 
+	// Response phase of the non-interactive zero-knowledge proof.
+	ρ_ωʺ := make([][]math.Scalar, 0, v.M)
+	ρ_E := make([]Ciphertext, 0, v.M)
+	ρ_seed := make([]ExpansionSeed, 0, v.N-v.M)
+	ωʺ := make([]math.Polynomial, v.N)
+
 	for k, kInS := range S {
 		if kInS {
 			// if k ∈ S, compute [ω"ₖ] <-- [ω] + [ω′ₖ] and set the response ρₖ <-- (ω"ₖ, Eₖ)
-			wʺ[k] = math.ScalarsAddElementWise(w, wꞌ[k])
-			ρ_wʺ = append(ρ_wʺ, wʺ[k])
+			ωʺ[k] = math.ScalarsAddElementWise(ω, ωꞌ[k])
+			ρ_ωʺ = append(ρ_ωʺ, ωʺ[k])
 			ρ_E = append(ρ_E, E[k])
 		} else {
 			// if k ∉ S, set the response ρₖ <-- seedₖ
@@ -167,7 +168,7 @@ func (v *vess) Deal(s Scalar, ad []byte, rand io.Reader) (*VerifiedDealing, erro
 		}
 	}
 
-	return &VerifiedDealing{UnverifiedDealing{C, h, ρ_wʺ, ρ_E, ρ_seed}}, nil
+	return &VerifiedDealing{UnverifiedDealing{C, h, ρ_ωʺ, ρ_E, ρ_seed}}, nil
 }
 
 // Verifies a given dealing D against the VESS instance parameters and the associated data ad.
@@ -183,7 +184,7 @@ func (v *vess) VerifyDealing(D *UnverifiedDealing, ad []byte) (*VerifiedDealing,
 	}
 
 	// Extract the components of the dealing for easier access.
-	C, h, ρ_wʺ, ρ_E, ρ_seed := D.c, D.h, D.ρ_wʺ, D.ρ_E, D.ρ_seed
+	C, h, ρ_ωʺ, ρ_E, ρ_seed := D.c, D.h, D.ρ_ωʺ, D.ρ_E, D.ρ_seed
 
 	// Recompute S <-- hCh([C], h, ad) for verification.
 	S, err := v.hCh(C, h, ad)
@@ -194,19 +195,19 @@ func (v *vess) VerifyDealing(D *UnverifiedDealing, ad []byte) (*VerifiedDealing,
 	// Recompute (C'ₖ, Eₖ) for all k ∈ { 0, 1, ..., N-1 }.
 	Cꞌ := make([][]Point, v.N)
 	E := make([]Ciphertext, v.N)
-	wʺ := make([]Polynomial, v.N)
+	ωʺ := make([]Polynomial, v.N)
 
-	i := 0 // index for ρ_wʺ and ρ_E
+	i := 0 // index for ρ_ωʺ and ρ_E
 	j := 0 // index for ρ_seed
 	for k, kInS := range S {
 		if kInS {
 			// if k ∈ S, parse ρₖ = ([ω"ₖ], Eₖ) and compute [C′ₖ] <-- g^[ω"ₖ] / [C].
-			var wʺₖ math.Scalars = ρ_wʺ[i]
+			var ωʺₖ math.Scalars = ρ_ωʺ[i]
 			var Eₖ Ciphertext = ρ_E[i]
 			i++
 
-			wʺ[k], E[k] = wʺₖ, Eₖ
-			Cꞌ[k] = wʺₖ.Commitment(v.curve)
+			ωʺ[k], E[k] = ωʺₖ, Eₖ
+			Cꞌ[k] = ωʺₖ.Commitment(v.curve)
 			for j, Cj := range C {
 				Cꞌ[k][j].Subtract(Cꞌ[k][j], Cj)
 			}
@@ -215,7 +216,7 @@ func (v *vess) VerifyDealing(D *UnverifiedDealing, ad []byte) (*VerifiedDealing,
 			var seedₖ ExpansionSeed = ρ_seed[j]
 			j++
 
-			if _, Cꞌ[k], E[k], err = v.round(k, seedₖ, ad); err != nil {
+			if _, Cꞌ[k], E[k], err = v.zkpCommitRound(k, seedₖ, ad); err != nil {
 				return nil, err
 			}
 		}
@@ -234,21 +235,21 @@ func (v *vess) VerifyDealing(D *UnverifiedDealing, ad []byte) (*VerifiedDealing,
 // Returns the secret share for recipient R, or an error if the decryption failed.
 func (v *vess) Decrypt(R int, dkᵢ dkgtypes.P256Keyring, D *VerifiedDealing, ad []byte) (Scalar, error) {
 	n := v.n
-	C, h, ρ_wʺ, ρ_E := D.c, D.h, D.ρ_wʺ, D.ρ_E
+	C, h, ρ_ωʺ, ρ_E := D.c, D.h, D.ρ_ωʺ, D.ρ_E
 
 	S, err := v.hCh(C, h, ad)
 	if err != nil {
 		return nil, err
 	}
 
-	// index for ρ_wʺ and ρ_E
+	// index for ρ_ωʺ and ρ_E
 	i := 0
 	for /* k */ _, kInS := range S {
 		if !kInS {
 			continue
 		}
 
-		var wʺₖ math.Scalars = ρ_wʺ[i]
+		var ωʺₖ math.Scalars = ρ_ωʺ[i]
 		var Eₖ Ciphertext = ρ_E[i]
 		i++
 
@@ -265,8 +266,8 @@ func (v *vess) Decrypt(R int, dkᵢ dkgtypes.P256Keyring, D *VerifiedDealing, ad
 			continue
 		}
 
-		// Compute s_R <-- [w"ₖ](R) - s'_R
-		s_R := wʺₖ.Eval(R).Subtract(sꞌ_R)
+		// Compute s_R <-- [ω"ₖ](R) - s'_R
+		s_R := ωʺₖ.Eval(R).Subtract(sꞌ_R)
 
 		// Check whether g^(s_R) == [C]^(R)
 		if err = v.VerifyShare(s_R, D, R); err != nil {
@@ -306,23 +307,23 @@ func (v *vess) Params() VESSParams {
 	return VESSParams{v.N, v.M}
 }
 
-// Derives the polynomial wꞌₖ of degree t-1, its commitment Cꞌₖ, and the round k's MRE ciphertext Eₖ.
-func (v *vess) round(k int, seedₖ ExpansionSeed, ad []byte) (wꞌₖ Polynomial, Cꞌₖ []Point, Eₖ Ciphertext, err error) {
-	// Compute (rₖ, [w'ₖ]) <-- H_exp^t(k, seedₖ, ad)
-	var rₖ [16]byte
-	if rₖ, wꞌₖ, err = v.hExp(k, seedₖ, ad); err != nil {
+// Derives the polynomial ωꞌₖ of degree t-1, its commitment Cꞌₖ, and the zkpCommitRound k's MRE ciphertext Eₖ.
+func (v *vess) zkpCommitRound(k int, seedₖ ExpansionSeed, ad []byte) (ωꞌₖ Polynomial, Cꞌₖ []Point, Eₖ Ciphertext, err error) {
+	// Compute (rₖ, [ω'ₖ]) <-- H_exp^t(k, seedₖ, ad)
+	var rₖ ExpansionSeed
+	if rₖ, ωꞌₖ, err = v.hExp(k, seedₖ, ad); err != nil {
 		return
 	}
 
-	// Compute [C'ₖ] <-- g^[w'ₖ]
-	Cꞌₖ = wꞌₖ.Commitment(v.curve)
+	// Compute [C'ₖ] <-- g^[ω'ₖ]
+	Cꞌₖ = ωꞌₖ.Commitment(v.curve)
 
-	// Compute [m] <-- [w'ₖ]([R]) || ⟨w'ₖ⟩
+	// Compute [m] <-- [ω'ₖ]([R]) || ⟨ω'ₖ⟩
 	m := make([][]byte, v.n+1)
 	for i := 0; i < v.n; i++ {
-		m[i] = wꞌₖ.Eval(i).Bytes()
+		m[i] = ωꞌₖ.Eval(i).Bytes()
 	}
-	if m[v.n], err = codec.Marshal(wꞌₖ); err != nil {
+	if m[v.n], err = codec.Marshal(ωꞌₖ); err != nil {
 		return
 	}
 
@@ -338,7 +339,7 @@ func (v *vess) validateDealing(D *UnverifiedDealing) error {
 		return fmt.Errorf("invalid dealing (nil)")
 	}
 
-	C, h, ρ_wʺ, ρ_E, ρ_seed := D.c, D.h, D.ρ_wʺ, D.ρ_E, D.ρ_seed
+	C, h, ρ_ωʺ, ρ_E, ρ_seed := D.c, D.h, D.ρ_ωʺ, D.ρ_E, D.ρ_seed
 
 	if err := v.validateCommitment(C); err != nil {
 		return err
@@ -346,7 +347,7 @@ func (v *vess) validateDealing(D *UnverifiedDealing) error {
 	if len(h) != digestSize {
 		return fmt.Errorf("invalid dealing (expected hash length: %d, got %d)", digestSize, len(h))
 	}
-	if err := v.validateResponses(ρ_wʺ, ρ_E, ρ_seed); err != nil {
+	if err := v.validateResponses(ρ_ωʺ, ρ_E, ρ_seed); err != nil {
 		return err
 	}
 
@@ -370,20 +371,20 @@ func (v *vess) validateCommitment(C PolynomialCommitment) error {
 }
 
 // Helper for the well-formed check of the responses (in the context of this VESS instance).
-func (v *vess) validateResponses(ρ_wʺ [][]Scalar, ρ_E []Ciphertext, ρ_seed []ExpansionSeed) error {
+func (v *vess) validateResponses(ρ_ωʺ [][]Scalar, ρ_E []Ciphertext, ρ_seed []ExpansionSeed) error {
 	t, N, M := v.t, v.N, v.M
-	if len(ρ_wʺ) != len(ρ_E) || len(ρ_wʺ) != M {
+	if len(ρ_ωʺ) != len(ρ_E) || len(ρ_ωʺ) != M {
 		return fmt.Errorf(
 			"invalid dealing (expected number of ([ωʺₖ], Eₖ) responses: (%d, %d), got (%d, %d))",
-			M, M, len(ρ_wʺ), len(ρ_E),
+			M, M, len(ρ_ωʺ), len(ρ_E),
 		)
 	}
 
-	for _, ρ_wʺᵢ := range ρ_wʺ {
-		if len(ρ_wʺᵢ) != t {
-			return fmt.Errorf("invalid dealing (expected polynomial degree: %d, got %d)", t-1, len(ρ_wʺᵢ)-1)
+	for _, ρ_ωʺᵢ := range ρ_ωʺ {
+		if len(ρ_ωʺᵢ) != t {
+			return fmt.Errorf("invalid dealing (expected polynomial degree: %d, got %d)", t-1, len(ρ_ωʺᵢ)-1)
 		}
-		for _, s := range ρ_wʺᵢ {
+		for _, s := range ρ_ωʺᵢ {
 			if s == nil {
 				return fmt.Errorf("invalid dealing (nil scalar in polynomial)")
 			}
@@ -421,16 +422,16 @@ func (v *vess) hExp(k int, seedₖ ExpansionSeed, ad []byte) (ExpansionSeed, []S
 		return rₖ, nil, err
 	}
 
-	wꞌₖ := make([]Scalar, v.t)
+	ωꞌₖ := make([]Scalar, v.t)
 	for i := 0; i < v.t; i++ {
 		var err error
-		wꞌₖ[i], err = v.curve.Scalar().SetRandom(h)
+		ωꞌₖ[i], err = v.curve.Scalar().SetRandom(h)
 		if err != nil {
 			return rₖ, nil, err
 		}
 	}
 
-	return rₖ, wꞌₖ, nil
+	return rₖ, ωꞌₖ, nil
 }
 
 // Compute the hash hComp(C'₁, E₁, ..., C'_N, E_N, ad).

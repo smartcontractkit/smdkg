@@ -22,7 +22,7 @@ func (r *ResultPackage) MarshalBinary() ([]byte, error) {
 }
 
 func (r *ResultPackage) UnmarshalBinary(data []byte) error {
-	r, err := codec.Unmarshal(data, r)
+	_, err := codec.Unmarshal(data, r)
 	return err
 }
 

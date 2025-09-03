@@ -13,8 +13,8 @@ import (
 
 // Scalar represents a scalar value in a finite field defined by a modulus.
 // Scalars of different moduli are not compatible, and cannot be used together in arithmetic operations.
-// TODO: Consider added a runtime checks ensuring that indeed the moduli are the same when performing operations.
-// Maybe that is overkill, as throughout an instance of a DKG protocol, only scalars with the same modulus are used.
+// Executing any arithmetic operation on scalars with different moduli will result in a panic.
+
 type Scalar = *scalar
 type Scalars []Scalar
 
@@ -29,10 +29,6 @@ var _ codec.Codec[*scalar] = &scalar{}
 type scalar struct {
 	value   Nat
 	modulus *Modulus
-}
-
-func (s *scalar) IsNil() bool {
-	return s == nil
 }
 
 // NewScalar creates a new scalar with the given modulus.
@@ -57,16 +53,22 @@ func NewScalarFromString(value string, modulus *Modulus) Scalar {
 	return &scalar{valueParsed, modulus}
 }
 
+func (s *scalar) IsNil() bool {
+	return s == nil
+}
+
 // x.Set(y) sets x = y, and returns the scalar x.
 // This creates a copy of the value of y, so that x and y can be modified independently.
-func (x Scalar) Set(y Scalar) Scalar {
+// This functions panics if x and y have different moduli.
+func (x *scalar) Set(y Scalar) Scalar {
+	requireEqualModulus(x, y)
 	copy(x.value.Bits(), y.value.Bits())
 	return x
 }
 
 // x.SetUint(y) sets x = y, returns the scalar x.
 // y must be smaller than the modulus of x.
-func (x Scalar) SetUint(y uint) Scalar {
+func (x *scalar) SetUint(y uint) Scalar {
 	x.value.SetUint(y).ExpandFor(&x.modulus.value)
 	return x
 }
@@ -74,7 +76,7 @@ func (x Scalar) SetUint(y uint) Scalar {
 // x.SetBytes(y) sets x to the scalar represented by the byte slice y, and returns x.
 // If y does not represent a valid scalar (of the expected length, and smaller than x.modulus), SetBytes returns an
 // error and the receiver is unchanged. Otherwise, SetBytes returns x.
-func (x Scalar) SetBytes(y []byte) (Scalar, error) {
+func (x *scalar) SetBytes(y []byte) (Scalar, error) {
 	_, err := x.value.SetBytes(y, &x.modulus.value)
 	if err != nil {
 		return nil, err
@@ -86,8 +88,8 @@ func (x Scalar) SetBytes(y []byte) (Scalar, error) {
 // sampled with uniformly distributed from {0, 1, 2, ... modulus - 1}. The underlying implementation must ensure
 // that a constant number of bytes is read from the provided io.Reader, and that the same scalar is
 // deterministically derived from the provided io.Reader.
-func (s Scalar) SetRandom(rand io.Reader) (Scalar, error) {
-	// Read entropy from the provided io.Reader, 128 bits (16 bytes) more thran the modulus size.
+func (s *scalar) SetRandom(rand io.Reader) (Scalar, error) {
+	// Read entropy from the provided io.Reader, 128 bits (16 bytes) more than the modulus size.
 	rngBytes := make([]byte, s.modulus.Size()+16)
 	if _, err := io.ReadFull(rand, rngBytes); err != nil {
 		return nil, err
@@ -108,67 +110,85 @@ func (s Scalar) SetRandom(rand io.Reader) (Scalar, error) {
 	}
 
 	// Finally, reduce the value modulo the scalar's modulus. Effectively, this means that the scalar's value will
-	// then be uniformly distributed in the range {0, 1, ... s.modulus - 1}.
+	// then be statistically close to uniformly distributed in range {0, 1, ... s.modulus - 1}.
 	s.value.Mod(t, &s.modulus.value)
 	return s, nil
 }
 
-func (x Scalar) Add(y Scalar) Scalar {
+// x.Add(y) computes x = x + y (mod modulus), and returns x.
+// This functions panics if x and y have different moduli.
+func (x *scalar) Add(y Scalar) Scalar {
+	requireEqualModulus(x, y)
 	x.value.Add(y.value, &x.modulus.value)
 	return x
 }
 
-func (x Scalar) Subtract(y Scalar) Scalar {
+// x.Subtract(y) computes x = x - y (mod modulus), and returns x.
+// This functions panics if x and y have different moduli.
+func (x *scalar) Subtract(y Scalar) Scalar {
+	requireEqualModulus(x, y)
 	x.value.Sub(y.value, &x.modulus.value)
 	return x
 }
 
-func (x Scalar) Multiply(y Scalar) Scalar {
+// x.Multiply(y) computes x = x * y (mod modulus), and returns x.
+// This functions panics if x and y have different moduli.
+func (x *scalar) Multiply(y Scalar) Scalar {
+	requireEqualModulus(x, y)
 	x.value.Mul(y.value, &x.modulus.value)
 	return x
 }
 
-func (x Scalar) InverseVarTime() (Scalar, bool) {
-	_, ok := x.value.InverseVarTime(x.value, &x.modulus.value)
-	return x, ok
+// x.InverseVarTime() computes the modular inverse of x = x^-1 and returns (x, true) if the inverse exists, or
+// (nil, false) otherwise.
+func (x *scalar) InverseVarTime() (Scalar, bool) {
+	if _, ok := x.value.InverseVarTime(x.value, &x.modulus.value); !ok {
+		return nil, false
+	}
+	return x, true
 }
 
-func (x Scalar) Exp(e []byte) Scalar {
+// x.Exp(e) computes x = x^e (mod modulus), and returns x.
+// The exponent e is interpreted as a big-endian integer.
+func (x *scalar) Exp(e []byte) Scalar {
 	x.value.Exp(x.value, e, &x.modulus.value)
 	return x
 }
 
 // x.IsZero() returns true if x is zero, and false otherwise.
-func (x Scalar) IsZero() bool {
+func (x *scalar) IsZero() bool {
 	return x.value.IsZero() == 1
 }
 
 // x.IsOne() returns true if x is zero, and false otherwise.
-func (x Scalar) IsOne() bool {
+func (x *scalar) IsOne() bool {
 	return x.value.IsOne() == 1
 }
 
 // Returns an independent copy of the scalar.
-func (x Scalar) Clone() Scalar {
+func (x *scalar) Clone() Scalar {
 	return NewScalar(x.modulus).Set(x)
 }
 
 // Returns the internal reference to the modulus underlying the scalar.
 // Must not be modified by the caller. Useful for the initialization of new scalars.
-func (x Scalar) Modulus() *Modulus {
+func (x *scalar) Modulus() *Modulus {
 	return x.modulus
 }
 
 // x.Bytes() returns the canonical encoding of x.
-func (x Scalar) Bytes() []byte {
+func (x *scalar) Bytes() []byte {
 	return x.value.Bytes(&x.modulus.value)
 }
 
-func (x Scalar) MarshalTo(target codec.Target) {
+// MarshalTo writes the canonical encoding of x to the provided codec.Target.
+func (x *scalar) MarshalTo(target codec.Target) {
 	target.WriteBytes(x.value.Bytes(&x.modulus.value))
 }
 
-func (x Scalar) UnmarshalFrom(source codec.Source) Scalar {
+// UnmarshalFrom reads the canonical encoding of a scalar from the provided codec.Source, sets it to x, and returns x.
+// The scalar x must have non-nil modulus, otherwise UnmarshalFrom panics.
+func (x *scalar) UnmarshalFrom(source codec.Source) Scalar {
 	b := source.ReadBytes(x.modulus.Size())
 	_, err := x.value.SetBytes(b, &x.modulus.value)
 	if err != nil {
@@ -177,34 +197,48 @@ func (x Scalar) UnmarshalFrom(source codec.Source) Scalar {
 	return x
 }
 
-// Tests two scalars for equality. Only supported for scalars with the same modulus.
-func (x Scalar) Equal(y Scalar) bool {
-	return x.value.Equal(y.value) == 1
+// x.Equal(y) tests two scalars for equality. Equality is defined as having the same value and the same modulus.
+func (x *scalar) Equal(y Scalar) bool {
+	return x == y || (x.value.Equal(y.value) == 1 && x.modulus.Equal(y.modulus))
 }
 
-// Non-constant time function, to be used for testing purposes.
-func (x Scalar) String() string {
+// x.String() returns a human readable representation of the scalar's value. It is a non-constant time function, to be
+// used for testing purposes.
+func (x *scalar) String() string {
 	return new(big.Int).SetBytes(x.value.Bytes(&x.modulus.value)).String()
 }
 
-func (w Scalars) MarshalTo(target codec.Target) {
-	for _, wᵢ := range w {
-		wᵢ.MarshalTo(target)
+// Checks that two scalars have the same modulus, and panics otherwise.
+// This is a helper function to be used at the beginning of arithmetic operations.
+// The check is typically very cheap, as it only compares pointers to the modulus in the first step.
+func requireEqualModulus(x Scalar, y Scalar) {
+	if !x.modulus.Equal(y.modulus) {
+		panic("scalars have different moduli")
 	}
 }
 
-func (w Scalars) Sum() Scalar {
+// MarshalTo writes the canonical encoding of all scalars in ω to the provided codec.Target.
+func (ω Scalars) MarshalTo(target codec.Target) {
+	for _, ωᵢ := range ω {
+		ωᵢ.MarshalTo(target)
+	}
+}
+
+// ω.Sum() returns the sum of all scalars in ω. If ω is empty, Sum returns nil.
+func (ω Scalars) Sum() Scalar {
 	var result Scalar
-	for _, wᵢ := range w {
+	for _, ωᵢ := range ω {
 		if result == nil {
-			result = wᵢ.Clone()
+			result = ωᵢ.Clone()
 		} else {
-			result.Add(wᵢ)
+			result.Add(ωᵢ)
 		}
 	}
 	return result
 }
 
+// ScalarsAddElementWise returns a new slice where each element is the sum of the corresponding elements in scalars1
+// and scalars2. Panics if the two slices have different lengths.
 func ScalarsAddElementWise(scalars1, scalars2 Scalars) Scalars {
 	if len(scalars1) != len(scalars2) {
 		panic("cannot add scalars slices of different lengths")
