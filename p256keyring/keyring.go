@@ -7,8 +7,8 @@ import (
 	"io"
 
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
-	"github.com/smartcontractkit/smdkg/internal/dkgtypes"
-	"github.com/smartcontractkit/smdkg/internal/math"
+	"github.com/smartcontractkit/smdkg/internal/crypto/dkgtypes"
+	"github.com/smartcontractkit/smdkg/internal/crypto/math"
 )
 
 const SecretKeyLength = 32 // scalar (mod P256 group order), 32 bytes, big-endian encoded integer
@@ -75,7 +75,6 @@ func (kr *P256Keyring) MarshalBinary() (data []byte, err error) {
 }
 
 // UnmarshalBinary implements encoding.BinaryUnmarshaler by importing the P256 key pair.
-// the corresponding public key.
 func (kr *P256Keyring) UnmarshalBinary(data []byte) error {
 	if len(data) != SecretKeyLength+PublicKeyLength {
 		return fmt.Errorf(

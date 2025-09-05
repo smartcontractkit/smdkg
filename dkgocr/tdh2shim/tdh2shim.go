@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
-	"github.com/smartcontractkit/smdkg/internal/crs"
-	"github.com/smartcontractkit/smdkg/internal/dkgtypes"
-	"github.com/smartcontractkit/smdkg/internal/math"
+	"github.com/smartcontractkit/smdkg/internal/crypto/crs"
+	"github.com/smartcontractkit/smdkg/internal/crypto/dkgtypes"
+	"github.com/smartcontractkit/smdkg/internal/crypto/math"
 	"github.com/smartcontractkit/tdh2/go/tdh2/tdh2"
 )
 

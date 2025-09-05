@@ -29,7 +29,8 @@ var _ cipher.Stream = &UnsafeRand{}
 // Map iteration order is not guaranteed, so passing a map as a seed argument may lead to non-deterministic behavior.
 func New(seedArgs ...any) *UnsafeRand {
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(fmt.Sprintf("%#v", seedArgs)))
+	_, _ = fmt.Fprintf(h, "%#v", seedArgs)
+
 	seed := int64(h.Sum64())
 	return &UnsafeRand{mrand.New(mrand.NewSource(seed))}
 }

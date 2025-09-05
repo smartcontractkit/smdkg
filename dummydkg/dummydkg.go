@@ -1,27 +1,43 @@
 package dummydkg
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"fmt"
-	"io"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
-	"github.com/smartcontractkit/smdkg/internal/math"
+	"github.com/smartcontractkit/smdkg/internal/codec"
+	"github.com/smartcontractkit/smdkg/internal/crypto/dkg"
+	"github.com/smartcontractkit/smdkg/internal/crypto/dkgtypes"
+	"github.com/smartcontractkit/smdkg/internal/crypto/math"
+	"github.com/smartcontractkit/smdkg/internal/crypto/p256keyringshim"
+	"github.com/smartcontractkit/smdkg/internal/ocr/plugin"
 	"github.com/smartcontractkit/smdkg/internal/testimplementations/unsaferand"
 	"github.com/smartcontractkit/smdkg/p256keyring"
 )
 
-func Setup(n, t int, seed string) (
-	dkgocrtypes.InstanceID,
-	dkgocrtypes.ReportingPluginConfig,
-	[]dkgocrtypes.P256Keyring,
-	io.Reader,
-	error,
+type ResultPackage struct {
+	inner  dkg.Result
+	config *dkgocrtypes.ReportingPluginConfig
+}
+
+func (r *ResultPackage) MarshalTo(target codec.Target) {
+	target.Write(r.inner)
+	configBytes, err := r.config.MarshalBinary()
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal config: %v", err))
+	}
+	target.WriteLengthPrefixedBytes(configBytes)
+}
+
+func Setup(n_D, n_R, t_R int, seed string) (
+	dkgocrtypes.InstanceID, dkgocrtypes.ReportingPluginConfig,
+	[]dkgocrtypes.P256Keyring, []dkgocrtypes.P256Keyring, *unsaferand.UnsafeRand, error,
 ) {
+	var err error
+
 	// Setup a deterministic random number generator based on the instance ID.
-	rand := unsaferand.New("DummyDKG-Setup", seed, n, t)
+	rand := unsaferand.New("DummyDKG-Setup", seed, n_D, n_R, t_R)
 
 	// Generate a unique instance ID based on the seed.
 	// This is a placeholder!
@@ -30,110 +46,78 @@ func Setup(n, t int, seed string) (
 		sha256.Sum256([]byte(seed)),
 	)
 
-	// Initialize keyrings for all participants.
-	recipientKeyrings := make([]dkgocrtypes.P256Keyring, n)
-	for i := 0; i < n; i++ {
-		recipientKeyring, err := p256keyring.New(rand)
-		if err != nil {
-			err = fmt.Errorf("failed to create keyring for participant %d: %w", i, err)
-			return "", dkgocrtypes.ReportingPluginConfig{}, nil, nil, err
+	// Initialize keyrings and public keys for all dealers.
+	dealers := make([]dkgocrtypes.P256ParticipantPublicKey, n_D)
+	dealerKeyrings := make([]dkgocrtypes.P256Keyring, n_D)
+	for i := 0; i < n_D; i++ {
+		if dealerKeyrings[i], err = p256keyring.New(rand); err != nil {
+			return "", dkgocrtypes.ReportingPluginConfig{}, nil, nil, nil, err
 		}
-		recipientKeyrings[i] = recipientKeyring
+		dealers[i] = dealerKeyrings[i].PublicKey()
 	}
 
-	// Get the public keys of all participants.
-	recipientPublicKeys := make([]dkgocrtypes.P256ParticipantPublicKey, n)
-	for i, keyring := range recipientKeyrings {
-		recipientPublicKeys[i] = keyring.PublicKey()
+	// Initialize keyrings and public keys for all recipients.
+	recipients := make([]dkgocrtypes.P256ParticipantPublicKey, n_R)
+	recipientKeyrings := make([]dkgocrtypes.P256Keyring, n_R)
+	for i := 0; i < n_R; i++ {
+		if recipientKeyrings[i], err = p256keyring.New(rand); err != nil {
+			return "", dkgocrtypes.ReportingPluginConfig{}, nil, nil, nil, err
+		}
+		recipients[i] = recipientKeyrings[i].PublicKey()
 	}
 
 	// Create a DKG configuration.
 	config := dkgocrtypes.ReportingPluginConfig{
-		nil,                 // public keys of the dealers (not used by the dummy DKG implementation)
-		recipientPublicKeys, // public keys of the recipients.
-		t,                   // number of shares needed to reconstruct the master secret key
-		nil,                 // no previous instance ID, fresh DKG run
+		dealers,    // public keys of the dealers
+		recipients, // public keys of the recipients
+		t_R,        // number of shares needed to reconstruct the master secret key
+		nil,        // no previous instance ID, fresh DKG run
 	}
 
-	return iid, config, recipientKeyrings, rand, nil
-}
-
-var _ dkgocrtypes.ResultPackage = &ResultPackage{}
-
-type ResultPackage struct {
-	iid    dkgocrtypes.InstanceID
-	config dkgocrtypes.ReportingPluginConfig
-	mpk    math.Point
-	mpks   []math.Point
-	msks   []math.Scalar
+	return iid, config, dealerKeyrings, recipientKeyrings, rand, nil
 }
 
 // Simulates the execution of a DKG protocol and returns its result. This demo implementation generates a DKG result
-// locally, but follows the DKG interface definitions.
-func NewResultPackage(iid dkgocrtypes.InstanceID, config dkgocrtypes.ReportingPluginConfig, rand io.Reader) (dkgocrtypes.ResultPackage, error) {
-	t := config.T
-	n := len(config.RecipientPublicKeys)
+// locally, but follows the DKG interface definitions. Simulating the execution requires passing all dealers' keyrings,
+// corresponding to the public keys in config.DealerPublicKeys.
+func NewResultPackage(
+	iid dkgocrtypes.InstanceID, config dkgocrtypes.ReportingPluginConfig, keyrings []dkgocrtypes.P256Keyring,
+) (dkgocrtypes.ResultPackage, error) {
+	var err error
 	curve := math.P256
 
-	// Generate a master secret centrally.
-	msk, err := curve.Scalar().SetRandom(rand)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate master secret key")
-	}
+	n_D := len(config.DealerPublicKeys)
+	f_D := (n_D - 1) / 3
+	n_R := len(config.RecipientPublicKeys)
+	t_R := config.T
 
-	// Compute the corresponding master public key.
-	mpk := curve.Point().ScalarBaseMult(msk)
+	dealers := make([]dkgtypes.P256PublicKey, n_D)
+	dealersKeyrings := make([]dkgtypes.P256Keyring, n_D)
 
-	// Setup a random polynomial to share it.
-	poly, err := math.RandomPolynomial(msk, t, rand)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate polynomial: %w", err)
-	}
-
-	// Compute the shares.
-	msks := make([]math.Scalar, n)
-	mpks := make([]math.Point, n)
-	for i := 0; i < n; i++ {
-		msks[i] = poly.Eval(i)
-		mpks[i] = curve.Point().ScalarBaseMult(msks[i])
-	}
-
-	return &ResultPackage{iid, config, mpk, mpks, msks}, nil
-}
-
-func (r *ResultPackage) InstanceID() dkgocrtypes.InstanceID {
-	return r.iid
-}
-
-func (r *ResultPackage) MasterPublicKey() dkgocrtypes.P256MasterPublicKey {
-	return r.mpk.Bytes()
-}
-
-func (r *ResultPackage) MasterPublicKeyShares() []dkgocrtypes.P256MasterPublicKeyShare {
-	mpks := make([]dkgocrtypes.P256MasterPublicKeyShare, len(r.mpks))
-	for i, k := range r.mpks {
-		mpks[i] = k.Bytes()
-	}
-	return mpks
-}
-
-func (r *ResultPackage) MasterSecretKeyShare(keyring dkgocrtypes.P256Keyring) (dkgocrtypes.P256MasterSecretKeyShare, error) {
-	for i, pk := range r.config.RecipientPublicKeys {
-		if bytes.Equal(pk, keyring.PublicKey()) {
-			return r.msks[i].Bytes(), nil
+	for i, keyring := range keyrings {
+		if dealers[i], err = dkgtypes.NewP256PublicKey(config.DealerPublicKeys[i]); err != nil {
+			return nil, err
+		}
+		dealersKeyrings[i], err = p256keyringshim.New(keyring)
+		if err != nil {
+			return nil, err
+		}
+		if !dealers[i].Equal(dealersKeyrings[i].PublicKey()) {
+			return nil, fmt.Errorf("dealer keyring %d does not match the corresponding public key in the config", i)
 		}
 	}
-	return nil, fmt.Errorf("failed to \"decrypt\" master secret key share using the given keyring")
-}
 
-func (r *ResultPackage) ReportingPluginConfig() dkgocrtypes.ReportingPluginConfig {
-	return r.config
-}
+	recipients := make([]dkgtypes.P256PublicKey, n_R)
+	for i, pk := range config.RecipientPublicKeys {
+		if recipients[i], err = dkgtypes.NewP256PublicKey(pk); err != nil {
+			return nil, err
+		}
+	}
 
-func (r *ResultPackage) MarshalBinary() (data []byte, err error) {
-	panic("not implemented")
-}
+	result, err := dkg.SimulateInitialDKGForTest(dkgtypes.InstanceID(iid), curve, dealers, recipients, f_D, t_R, dealersKeyrings)
+	if err != nil {
+		return nil, err
+	}
 
-func (r *ResultPackage) UnmarshalBinary(data []byte) error {
-	panic("not implemented")
+	return &plugin.ResultPackage{result, &config}, nil
 }

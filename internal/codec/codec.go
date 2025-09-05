@@ -7,6 +7,8 @@ import "fmt"
 //
 // The codec.Unmarshal(...) and codec.UnmarshalFromSource() functions always recover from panics during unmarshaling.
 
+// TODO: Change byte order to BigEndian.
+
 const IntSize = 4
 
 type Marshaler interface {

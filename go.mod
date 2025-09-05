@@ -5,7 +5,7 @@ go 1.24.1
 require (
 	filippo.io/nistec v0.0.3
 	github.com/prometheus/client_golang v1.23.0
-	github.com/smartcontractkit/libocr v0.0.0-20250707144819-babe0ec4e358
+	github.com/smartcontractkit/libocr v0.0.0-20250905115425-2785a5cee79d
 	github.com/smartcontractkit/tdh2/go/tdh2 v0.0.0-20250624150019-e49f7e125e6b
 	github.com/stretchr/testify v1.10.0
 )
