@@ -20,8 +20,10 @@ type InMemoryDatabase struct {
 	mu            sync.Mutex
 }
 
-var _ types.Database = (*InMemoryDatabase)(nil)
-var _ ocr3types.ProtocolStateDatabase = (*InMemoryDatabase)(nil)
+var (
+	_ types.Database                  = (*InMemoryDatabase)(nil)
+	_ ocr3types.ProtocolStateDatabase = (*InMemoryDatabase)(nil)
+)
 
 func (db *InMemoryDatabase) ReadState(_ context.Context, digest types.ConfigDigest) (*types.PersistentState, error) {
 	db.mu.Lock()
@@ -144,15 +146,17 @@ type OCR3_1InMemoryDatabase struct {
 	*InMemoryDatabase
 }
 
-var _ ocr3types.ProtocolStateDatabase = (*OCR3_1InMemoryDatabase)(nil)
-var _ ocr3_1types.BlockDatabase = (*OCR3_1InMemoryDatabase)(nil)
+var (
+	_ ocr3types.ProtocolStateDatabase = (*OCR3_1InMemoryDatabase)(nil)
+	_ ocr3_1types.BlockDatabase       = (*OCR3_1InMemoryDatabase)(nil)
+)
 
-func NewOCR3_1InMemoryDatabase() *OCR3_1InMemoryDatabase {
+func NewOCR3_1InMemoryDatabase(config types.ContractConfig) *OCR3_1InMemoryDatabase {
 	return &OCR3_1InMemoryDatabase{
 		&InMemoryDatabase{
 			types.PersistentState{},
 			make(map[string][]byte),
-			types.ContractConfig{},
+			config,
 			make(map[types.ReportTimestamp]types.PendingTransmission),
 			sync.Mutex{},
 		},

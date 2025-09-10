@@ -6,7 +6,7 @@ import (
 	"github.com/smartcontractkit/libocr/commontypes"
 	"github.com/smartcontractkit/libocr/offchainreporting2plus"
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/ocr3_1types"
-	ocr2ptypes "github.com/smartcontractkit/libocr/offchainreporting2plus/types"
+	"github.com/smartcontractkit/libocr/offchainreporting2plus/types"
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
 	"github.com/smartcontractkit/smdkg/internal/ocr/onchainkeyring"
 	"github.com/smartcontractkit/smdkg/internal/ocr/plugin"
@@ -15,17 +15,17 @@ import (
 
 func OCR3_1OracleArgsForSanMarinoDKG(
 	// regular OCR injected dependencies
-	binaryNetworkEndpointFactory ocr2ptypes.BinaryNetworkEndpoint2Factory,
+	binaryNetworkEndpointFactory types.BinaryNetworkEndpoint2Factory,
 	v2Bootstrappers []commontypes.BootstrapperLocator,
-	contractConfigTracker ocr2ptypes.ContractConfigTracker,
+	contractConfigTracker types.ContractConfigTracker,
 	database ocr3_1types.Database,
 	keyValueDatabaseFactory ocr3_1types.KeyValueDatabaseFactory,
-	localConfig ocr2ptypes.LocalConfig,
+	localConfig types.LocalConfig,
 	logger commontypes.Logger,
 	metricsRegisterer prometheus.Registerer,
 	monitoringEndpoint commontypes.MonitoringEndpoint,
-	offchainConfigDigester ocr2ptypes.OffchainConfigDigester,
-	offchainKeyring ocr2ptypes.OffchainKeyring,
+	offchainConfigDigester types.OffchainConfigDigester,
+	offchainKeyring types.OffchainKeyring,
 	// special for DKG
 	dkgP256Keyring dkgocrtypes.P256Keyring,
 	dealingResultPackageDatabase dkgocrtypes.ResultPackageDatabase,
@@ -44,7 +44,7 @@ func OCR3_1OracleArgsForSanMarinoDKG(
 		monitoringEndpoint,
 		offchainConfigDigester,
 		offchainKeyring,
-		&onchainkeyring.OnchainKeyring{OffchainKeyring: offchainKeyring},
+		&onchainkeyring.OCR3CapabilityCompatibleOnchainKeyring{OffchainKeyring: offchainKeyring},
 		plugin.NewDKGPluginFactory(logger, dkgP256Keyring, dealingResultPackageDatabase, configContractAddress),
 	}
 }

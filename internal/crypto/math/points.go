@@ -72,7 +72,10 @@ func (v *P224Point) SetBytes(x []byte) (Point, error) {
 	if err != nil {
 		return nil, err
 	}
-	// TODO: consider stricter validation, enforcing canonical encoding.
+
+	if subtle.ConstantTimeCompare(v.value.BytesCompressed(), x) != 1 {
+		return nil, fmt.Errorf("invalid P224 point: not in canonical form")
+	}
 	return v, nil
 }
 
@@ -159,7 +162,10 @@ func (v *P256Point) SetBytes(x []byte) (Point, error) {
 	if err != nil {
 		return nil, err
 	}
-	// TODO: consider stricter validation, enforcing canonical encoding.
+
+	if subtle.ConstantTimeCompare(v.value.BytesCompressed(), x) != 1 {
+		return nil, fmt.Errorf("invalid P256 point: not in canonical form")
+	}
 	return v, nil
 }
 
@@ -246,7 +252,10 @@ func (v *P384Point) SetBytes(x []byte) (Point, error) {
 	if err != nil {
 		return nil, err
 	}
-	// TODO: consider stricter validation, enforcing canonical encoding.
+
+	if subtle.ConstantTimeCompare(v.value.BytesCompressed(), x) != 1 {
+		return nil, fmt.Errorf("invalid P384 point: not in canonical form")
+	}
 	return v, nil
 }
 
@@ -333,7 +342,10 @@ func (v *P521Point) SetBytes(x []byte) (Point, error) {
 	if err != nil {
 		return nil, err
 	}
-	// TODO: consider stricter validation, enforcing canonical encoding.
+
+	if subtle.ConstantTimeCompare(v.value.BytesCompressed(), x) != 1 {
+		return nil, fmt.Errorf("invalid P521 point: not in canonical form")
+	}
 	return v, nil
 }
 
@@ -428,7 +440,10 @@ func (v *Edward25519Point) SetBytes(x []byte) (Point, error) {
 	if err != nil {
 		return nil, err
 	}
-	// TODO: consider stricter validation, enforcing canonical encoding.
+
+	if subtle.ConstantTimeCompare(v.value.Bytes(), x) != 1 {
+		return nil, fmt.Errorf("invalid Edwards25519 point: not in canonical form")
+	}
 	return v, nil
 }
 

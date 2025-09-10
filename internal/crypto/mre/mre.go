@@ -135,7 +135,7 @@ func Decrypt(n int, i int, Dᵢ dkgtypes.P256Keyring, E Ciphertext, ad []byte) (
 		return nil, fmt.Errorf("invalid ciphertext: failed to decode: %w", err)
 	}
 
-	// Get the specical Eₒ = g ^ r value.
+	// Get the special Eₒ = g ^ r value.
 	Eₒ := ciphertext.Eₒ
 
 	// Get the i'th ciphertext

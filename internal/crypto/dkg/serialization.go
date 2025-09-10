@@ -119,19 +119,19 @@ func (d *verifiedInitialDealing) UnmarshalFrom(source codec.Source) VerifiedInit
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-func NewVerifiedDecryptionKeySharesForInnerDealing() VerifiedDecryptionKeySharesForInnerDealing {
-	return &verifiedDecryptionKeySharesForInnerDealing{}
+func NewVerifiedDecryptionKeySharesForInnerDealings() VerifiedDecryptionKeySharesForInnerDealings {
+	return &verifiedDecryptionKeySharesForInnerDealings{}
 }
 
-func NewUnverifiedDecryptionKeySharesForInnerDealing() UnverifiedDecryptionKeySharesForInnerDealing {
-	return &unverifiedDecryptionKeySharesForInnerDealing{}
+func NewUnverifiedDecryptionKeySharesForInnerDealings() UnverifiedDecryptionKeySharesForInnerDealings {
+	return &unverifiedDecryptionKeySharesForInnerDealings{}
 }
 
-func (s *decryptionKeySharesForInnerDealing) IsNil() bool {
+func (s *decryptionKeySharesForInnerDealings) IsNil() bool {
 	return s == nil
 }
 
-func (s *decryptionKeySharesForInnerDealing) MarshalTo(target codec.Target) {
+func (s *decryptionKeySharesForInnerDealings) MarshalTo(target codec.Target) {
 	s.curve.MarshalTo(target)
 	target.WriteInt(len(s.z_D))
 	for _, share := range s.z_D {
@@ -139,7 +139,7 @@ func (s *decryptionKeySharesForInnerDealing) MarshalTo(target codec.Target) {
 	}
 }
 
-func (ds *decryptionKeySharesForInnerDealing) UnmarshalFrom(source codec.Source) *decryptionKeySharesForInnerDealing {
+func (ds *decryptionKeySharesForInnerDealings) UnmarshalFrom(source codec.Source) *decryptionKeySharesForInnerDealings {
 	ds.curve = math.UnmarshalCurve(source)
 
 	numShares := source.ReadInt()
@@ -152,31 +152,31 @@ func (ds *decryptionKeySharesForInnerDealing) UnmarshalFrom(source codec.Source)
 	return ds
 }
 
-func (s *unverifiedDecryptionKeySharesForInnerDealing) IsNil() bool {
+func (s *unverifiedDecryptionKeySharesForInnerDealings) IsNil() bool {
 	return s == nil
 }
 
-func (s *unverifiedDecryptionKeySharesForInnerDealing) MarshalTo(target codec.Target) {
+func (s *unverifiedDecryptionKeySharesForInnerDealings) MarshalTo(target codec.Target) {
 	s.base.MarshalTo(target)
 }
 
-func (s *unverifiedDecryptionKeySharesForInnerDealing) UnmarshalFrom(source codec.Source) UnverifiedDecryptionKeySharesForInnerDealing {
-	return &unverifiedDecryptionKeySharesForInnerDealing{
-		codec.ReadObject(source, &decryptionKeySharesForInnerDealing{}),
+func (s *unverifiedDecryptionKeySharesForInnerDealings) UnmarshalFrom(source codec.Source) UnverifiedDecryptionKeySharesForInnerDealings {
+	return &unverifiedDecryptionKeySharesForInnerDealings{
+		codec.ReadObject(source, &decryptionKeySharesForInnerDealings{}),
 	}
 }
 
-func (s *verifiedDecryptionKeySharesForInnerDealing) IsNil() bool {
+func (s *verifiedDecryptionKeySharesForInnerDealings) IsNil() bool {
 	return s == nil
 }
 
-func (s *verifiedDecryptionKeySharesForInnerDealing) MarshalTo(target codec.Target) {
+func (s *verifiedDecryptionKeySharesForInnerDealings) MarshalTo(target codec.Target) {
 	s.base.MarshalTo(target)
 }
 
-func (s *verifiedDecryptionKeySharesForInnerDealing) UnmarshalFrom(source codec.Source) VerifiedDecryptionKeySharesForInnerDealing {
-	return &verifiedDecryptionKeySharesForInnerDealing{
-		codec.ReadObject(source, &decryptionKeySharesForInnerDealing{}),
+func (s *verifiedDecryptionKeySharesForInnerDealings) UnmarshalFrom(source codec.Source) VerifiedDecryptionKeySharesForInnerDealings {
+	return &verifiedDecryptionKeySharesForInnerDealings{
+		codec.ReadObject(source, &decryptionKeySharesForInnerDealings{}),
 	}
 }
 

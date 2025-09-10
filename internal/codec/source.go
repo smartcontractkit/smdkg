@@ -5,23 +5,29 @@ import (
 	"fmt"
 )
 
+// Internal representation for a source of bytes to be unmarshaled. The buffer slice is modified during reading.
 type source struct {
 	buffer []byte
 }
 
+// Available returns the number of bytes that are still available for reading from the source.
 func (s *source) Available() int {
 	return len(s.buffer)
 }
 
+// ReadInt reads a 32-bit signed integer from the source in BigEndian byte order.
+// It panics if not enough bytes are available in the source.
 func (s *source) ReadInt() int {
 	if len(s.buffer) < IntSize {
 		panic(fmt.Sprintf("ReadInt called, %d bytes required, but only %d bytes available", IntSize, len(s.buffer)))
 	}
-	value := int(int32(binary.LittleEndian.Uint32(s.buffer)))
+	value := int(int32(binary.BigEndian.Uint32(s.buffer)))
 	s.buffer = s.buffer[IntSize:]
 	return value
 }
 
+// ReadNonNegativeInt reads a non-negative 32-bit signed integer from the source in BigEndian byte order.
+// It panics if not enough bytes are available in the source or if the read integer is negative.
 func (s *source) ReadNonNegativeInt() int {
 	value := s.ReadInt()
 	if value < 0 {
@@ -30,6 +36,8 @@ func (s *source) ReadNonNegativeInt() int {
 	return value
 }
 
+// ReadBool reads a boolean value from the source.
+// It panics if not enough bytes are available in the source.
 func (s *source) ReadBool() bool {
 	if len(s.buffer) < 1 {
 		panic("ReadBool called on empty source buffer")
@@ -61,6 +69,9 @@ func (s *source) ReadBytesInto(buffer []byte) {
 	s.buffer = s.buffer[len(buffer):]
 }
 
+// ReadLengthPrefixedBytes reads a length-prefixed byte slice from the source. The length is encoded as a 32-bit signed
+// integer in BigEndian byte order. A length of -1 indicates a nil slice. It panics if not enough bytes are available
+// in the source or if the length is negative (and not -1).
 func (s *source) ReadLengthPrefixedBytes() []byte {
 	length := s.ReadInt()
 
@@ -75,6 +86,8 @@ func (s *source) ReadLengthPrefixedBytes() []byte {
 	return s.ReadBytes(length)
 }
 
+// ReadString reads a length-prefixed string from the source. The length is encoded as a 32-bit signed integer in
+// BigEndian byte order. It panics if not enough bytes are available in the source or if the length is negative.
 func (s *source) ReadString() string {
 	length := s.ReadInt()
 	if length < 0 {

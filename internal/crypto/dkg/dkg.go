@@ -63,21 +63,21 @@ type DKG interface {
 	//
 	// The initial dealings in L must be from different dealers Dꞌ, and must have been verified successfully. This list
 	// of initial dealings L must be given as a list of length n_D, containing exactly f_D+1 / t_D non-nil values.
-	DecryptDecryptionKeyShares(L []VerifiedInitialDealing) (VerifiedDecryptionKeySharesForInnerDealing, error)
+	DecryptDecryptionKeyShares(L []VerifiedInitialDealing) (VerifiedDecryptionKeySharesForInnerDealings, error)
 
 	// Executed when some dealer D wants to verify the decryption key shares (z_{D', D*}) the dealer D* (=Dˣ below)
 	// broadcasted. The dealers D' ∈ L are the original issuers of the shares for which D* provided decryption key
 	// shares.
 	VerifyDecryptionKeyShares(
-		L []VerifiedInitialDealing, Z_Dˣ UnverifiedDecryptionKeySharesForInnerDealing, Dˣ int,
-	) (VerifiedDecryptionKeySharesForInnerDealing, error)
+		L []VerifiedInitialDealing, Z_Dˣ UnverifiedDecryptionKeySharesForInnerDealings, Dˣ int,
+	) (VerifiedDecryptionKeySharesForInnerDealings, error)
 
 	// Recover the inner dealings ID_Dꞌ for all Dꞌ ∈ Lꞌ from the given list of verified initial dealings L and the
 	// decryption key shares z_{Dꞌ, Dˣ} for all Dˣ ∈ Lˣ (the dealers that provided decryption key shares).
 	// Both L and z are given as lists, with nil values for missing entries (i.e., dealings not in L, or decryption key
 	// shares not available).
 	RecoverInnerDealings(
-		L []VerifiedInitialDealing, z []VerifiedDecryptionKeySharesForInnerDealing,
+		L []VerifiedInitialDealing, z []VerifiedDecryptionKeySharesForInnerDealings,
 	) (Lꞌ []VerifiedInnerDealing, B IndicesOfBadDealers, restartRequired bool, err error)
 
 	// Derive the DKG's results from the given list of verified inner dealings (i.e., for all D ∈ L').
@@ -290,7 +290,7 @@ func (dkg *dkg) VerifyInitialDealing(initialDealing UnverifiedInitialDealing, D�
 	return &verifiedInitialDealing{OD_Dꞌ_verified, EID_Dꞌ}, nil
 }
 
-func (dkg *dkg) DecryptDecryptionKeyShares(L []VerifiedInitialDealing) (VerifiedDecryptionKeySharesForInnerDealing, error) {
+func (dkg *dkg) DecryptDecryptionKeyShares(L []VerifiedInitialDealing) (VerifiedDecryptionKeySharesForInnerDealings, error) {
 	n_D := len(dkg.dealers)
 	if len(L) != n_D {
 		return nil, fmt.Errorf("invalid dealings list length: expected %d, got %d", n_D, len(L))
@@ -315,14 +315,14 @@ func (dkg *dkg) DecryptDecryptionKeyShares(L []VerifiedInitialDealing) (Verified
 		z_D[Dꞌ] = z_Dꞌ_D
 	}
 
-	return &verifiedDecryptionKeySharesForInnerDealing{
-		&decryptionKeySharesForInnerDealing{dkg.curve, z_D},
+	return &verifiedDecryptionKeySharesForInnerDealings{
+		&decryptionKeySharesForInnerDealings{dkg.curve, z_D},
 	}, nil
 }
 
 func (dkg *dkg) VerifyDecryptionKeyShares(
-	L []VerifiedInitialDealing, Z_Dˣ UnverifiedDecryptionKeySharesForInnerDealing, Dˣ int,
-) (VerifiedDecryptionKeySharesForInnerDealing, error) {
+	L []VerifiedInitialDealing, Z_Dˣ UnverifiedDecryptionKeySharesForInnerDealings, Dˣ int,
+) (VerifiedDecryptionKeySharesForInnerDealings, error) {
 	n_D := len(dkg.dealers)
 	curve := Z_Dˣ.internal().base.curve
 	z_Dˣ := Z_Dˣ.internal().base.z_D
@@ -351,12 +351,12 @@ func (dkg *dkg) VerifyDecryptionKeyShares(
 		}
 	}
 
-	return &verifiedDecryptionKeySharesForInnerDealing{Z_Dˣ.internal().base}, nil
+	return &verifiedDecryptionKeySharesForInnerDealings{Z_Dˣ.internal().base}, nil
 }
 
 type IndicesOfBadDealers = []int
 
-func (dkg *dkg) RecoverInnerDealings(L []VerifiedInitialDealing, z []VerifiedDecryptionKeySharesForInnerDealing) (
+func (dkg *dkg) RecoverInnerDealings(L []VerifiedInitialDealing, z []VerifiedDecryptionKeySharesForInnerDealings) (
 	Lꞌ []VerifiedInnerDealing, B IndicesOfBadDealers, restartRequired bool, err error,
 ) {
 	n_D := len(dkg.dealers)
@@ -391,6 +391,9 @@ func (dkg *dkg) RecoverInnerDealings(L []VerifiedInitialDealing, z []VerifiedDec
 		return nil, nil, false, err
 	}
 
+	// Keep track of the number of valid inner dealings to be determined in the loop below.
+	numValidInnerDealings := 0
+
 	for Dꞌ, L_Dꞌ := range L {
 		if L_Dꞌ == nil {
 			continue
@@ -423,17 +426,28 @@ func (dkg *dkg) RecoverInnerDealings(L []VerifiedInitialDealing, z []VerifiedDec
 		// Reconstruct the inner dealing ID_D' from the encrypted inner dealings EID_Dꞌ.
 		ID_Dꞌ, err := dkg.decryptAndVerifyInnerDealing(Dꞌ, EID_Dꞌ, z_Dꞌ, y_Dꞌ)
 		if err != nil {
-			// Dꞌ is as added to the list of bad dealers, as the inner dealing could not be decrypted / verified
+			// Dꞌ is added to the list of bad dealers, as the inner dealing could not be decrypted / verified.
 			B = append(B, Dꞌ)
 			restartRequired = dkg.priorResult != nil // re-sharing requires all dealings to be valid
 			continue
 		}
+
 		Lꞌ[Dꞌ] = &verifiedInnerDealing{ID_Dꞌ}
+		numValidInnerDealings++
+	}
+
+	if numValidInnerDealings == 0 {
+		// No valid inner dealings could be recovered. This should only ever happen due to a threshold violation.
+		return nil, B, restartRequired, fmt.Errorf("no valid inner dealings could be recovered")
 	}
 	return Lꞌ, B, restartRequired, nil
 }
 
 func (dkg *dkg) NewResult(Lꞌ []VerifiedInnerDealing) (Result, error) {
+	if len(Lꞌ) != len(dkg.dealers) {
+		return nil, fmt.Errorf("invalid inner dealings list length: expected %d, got %d", len(dkg.dealers), len(Lꞌ))
+	}
+
 	t_R := dkg.t_R
 	C := make(math.PolynomialCommitment, t_R)
 	C_Lꞌ := make([]math.PolynomialCommitment, 0) // commitments of all D ∈ L'
@@ -450,6 +464,10 @@ func (dkg *dkg) NewResult(Lꞌ []VerifiedInnerDealing) (Result, error) {
 			return nil, fmt.Errorf("invalid commitment length: expected %d, got %d", t_R, len(C_D))
 		}
 		C_Lꞌ = append(C_Lꞌ, C_D)
+	}
+
+	if len(C_Lꞌ) == 0 {
+		return nil, fmt.Errorf("no valid inner dealings provided")
 	}
 
 	interpolate, err := math.NewInterpolator(dkg.curve, i_Lꞌ)

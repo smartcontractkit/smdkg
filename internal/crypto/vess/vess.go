@@ -15,12 +15,14 @@ import (
 	"github.com/smartcontractkit/smdkg/internal/crypto/xof"
 )
 
-type Scalar = math.Scalar
-type Scalars = math.Scalars
-type Point = math.Point
-type Polynomial = math.Polynomial
-type PolynomialCommitment = math.PolynomialCommitment
-type Ciphertext = []byte
+type (
+	Scalar               = math.Scalar
+	Scalars              = math.Scalars
+	Point                = math.Point
+	Polynomial           = math.Polynomial
+	PolynomialCommitment = math.PolynomialCommitment
+	Ciphertext           = []byte
+)
 
 const (
 	expansionSeedSize                  = 16
@@ -64,7 +66,7 @@ type vess struct {
 	n          int                      // number of recipients
 	t          int                      // secret sharing threshold
 	recipients []dkgtypes.P256PublicKey // recipient public keys
-	ek         []dkgtypes.P256PublicKey // recipients public keys || crs
+	ek         []dkgtypes.P256PublicKey // recipient public keys || crs
 	N          int                      // repetition parameter
 	M          int                      // subset size parameter
 }
@@ -176,7 +178,7 @@ func (v *vess) Deal(s Scalar, ad []byte, rand io.Reader) (*VerifiedDealing, erro
 func (v *vess) VerifyDealing(D *UnverifiedDealing, ad []byte) (*VerifiedDealing, error) {
 	// Safeguard to ensure only VESS instances initialized with recipient public keys are used for verification.
 	if v.recipients == nil {
-		return nil, fmt.Errorf("VESS instance not initializalized with the recipients's public keys")
+		return nil, fmt.Errorf("VESS instance not initialized with the recipients's public keys")
 	}
 
 	// Verify that the received data structure is well-formed.
@@ -504,4 +506,15 @@ func (v *vess) hCh(C []Point, h []byte, ad []byte) ([]bool, error) {
 		S[i] = permutation[i] < v.M
 	}
 	return S, nil
+}
+
+// Returns the expected size of a serialized VESS dealing, given the curve used, the number of recipients n and
+// threshold t. The given estimate is an upper bound and typically (=when all MRE encryptions succeed) tight.
+func EstimateDealingSize(curve math.Curve, n int, t int) int {
+	// Compute optimal parameters N and M for the given n and t.
+	CPs := candidateParameters(curve, n, t, statisticalSecurityBits)
+	OP := selectOptimalParameters(CPs, computeWeightForParameterSelection)
+
+	// Return the expected size of a serialized VESS dealing for the given parameters.
+	return dealingSize(curve, n, t, OP.N, OP.M)
 }

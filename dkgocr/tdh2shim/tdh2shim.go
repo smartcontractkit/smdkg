@@ -134,6 +134,6 @@ func convertToUncompressedPoint(point math.Point) ([]byte, error) {
 	case *math.P521Point:
 		return p.BytesUncompressed(), nil
 	default:
-		return nil, fmt.Errorf("failed to convert point into uncompressed format, unsupport point type")
+		return nil, fmt.Errorf("failed to convert point into uncompressed format, unsupported point type")
 	}
 }

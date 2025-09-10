@@ -9,6 +9,8 @@ import (
 	"github.com/smartcontractkit/smdkg/internal/crypto/p256keyringshim"
 )
 
+// ResultPackage implements the dkgocrtypes.ResultPackage interface.
+
 var _ dkgocrtypes.ResultPackage = &ResultPackage{}
 
 type ResultPackage struct {

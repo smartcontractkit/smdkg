@@ -15,13 +15,13 @@ func MakeContractConfig(F, N int, reportingPluginConfig []byte) types.ContractCo
 	signers, transmitters, f, onchainConfig, offchainConfigVersion, offchainConfig, err := ocr3confighelper.ContractSetConfigArgsForTests(
 		10*time.Second,
 		10*time.Second,
-		3*time.Second,
-		time.Second,
-		time.Second,
+		200*time.Millisecond,
+		time.Millisecond,
+		0,
 		time.Second,
 		time.Second,
 		10,
-		[]int{31},
+		[]int{N},
 		OracleIdentities(N),
 		reportingPluginConfig,
 		nil,
@@ -53,10 +53,8 @@ type FakeContractConfigTracker struct {
 	config types.ContractConfig
 }
 
-func NewFakeContractConfigTracker(F, N int, offchainConfig []byte) *FakeContractConfigTracker {
-	return &FakeContractConfigTracker{
-		config: MakeContractConfig(F, N, offchainConfig),
-	}
+func NewFakeContractConfigTracker(config types.ContractConfig) *FakeContractConfigTracker {
+	return &FakeContractConfigTracker{config}
 }
 
 func (f *FakeContractConfigTracker) Notify() <-chan struct{} {

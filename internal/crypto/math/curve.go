@@ -7,7 +7,7 @@ type Curve interface {
 	internal()
 
 	codec.Marshaler
-	// Use math.UnmarshalCurve(...) to unmarshal.
+	// Use codec.UnmarshalUsing(..., math.UnmarshalCurve) to unmarshal.
 
 	// Returns the name of the curve.
 	// This is used for debugging and logging purposes.

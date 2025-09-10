@@ -4,9 +4,11 @@ import (
 	"crypto/ed25519"
 	"fmt"
 
-	"github.com/smartcontractkit/libocr/offchainreporting2/types"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/confighelper"
+	"github.com/smartcontractkit/libocr/offchainreporting2plus/types"
 	ragetypes "github.com/smartcontractkit/libocr/ragep2p/types"
+	"github.com/smartcontractkit/smdkg/internal/ocr/onchainkeyring"
 	"golang.org/x/crypto/curve25519"
 )
 
@@ -46,12 +48,13 @@ func OracleIdentity(i int) confighelper.OracleIdentityExtra {
 	}
 
 	pubKey := offchainPublicKeyKeyFromPrivateKey(OffchainPrivateKey(i))
+
 	return confighelper.OracleIdentityExtra{
 		confighelper.OracleIdentity{
 			pubKey,
-			types.OnchainPublicKey(pubKey[:]),
+			onchainkeyring.OCR3CapabilityCompatibleOnchainPublicKey(pubKey),
 			peerIDFromPrivateKey(P2pPrivateKey(i)),
-			types.Account(fmt.Sprintf("0xc1c1c1c1%x", pubKey[:16])),
+			types.Account(common.HexToAddress(fmt.Sprintf("0xc1c1c1c1%x", pubKey[:16])).String()),
 		},
 		configEncryptionPublicKey,
 	}

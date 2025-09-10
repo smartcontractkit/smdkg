@@ -1,5 +1,5 @@
 // Constant time implementation of scalar arithmetic based on the bigmod package from Go's internal stdlib, exported
-// via flippo.io/bigmod.
+// via filippo.io/bigmod.
 
 package math
 
@@ -85,7 +85,7 @@ func (x *scalar) SetBytes(y []byte) (Scalar, error) {
 }
 
 // x.SetRandom(rand io.Reader) sets x to a random scalar and returns x. We require the random value to be
-// sampled with uniformly distributed from {0, 1, 2, ... modulus - 1}. The underlying implementation must ensure
+// sampled with uniformly distributed from {0, 1, 2, ... modulus - 1}. The underlying implementation ensures
 // that a constant number of bytes is read from the provided io.Reader, and that the same scalar is
 // deterministically derived from the provided io.Reader.
 func (s *scalar) SetRandom(rand io.Reader) (Scalar, error) {

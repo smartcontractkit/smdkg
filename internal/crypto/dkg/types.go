@@ -56,19 +56,19 @@ type VerifiedInitialDealing interface {
 	AsUnverifiedDealing() UnverifiedInitialDealing
 }
 
-// The UnverifiedDecryptionKeySharesForInnerDealing type represents a (received) dealer's contribution to the decryption
+// The UnverifiedDecryptionKeySharesForInnerDealings type represents a (received) dealer's contribution to the decryption
 // of the inner dealings prior to verification.
-type UnverifiedDecryptionKeySharesForInnerDealing interface {
-	internal() *unverifiedDecryptionKeySharesForInnerDealing
-	codec.Codec[UnverifiedDecryptionKeySharesForInnerDealing]
+type UnverifiedDecryptionKeySharesForInnerDealings interface {
+	internal() *unverifiedDecryptionKeySharesForInnerDealings
+	codec.Codec[UnverifiedDecryptionKeySharesForInnerDealings]
 }
 
-type VerifiedDecryptionKeySharesForInnerDealing interface {
-	internal() *verifiedDecryptionKeySharesForInnerDealing
-	codec.Codec[VerifiedDecryptionKeySharesForInnerDealing]
+type VerifiedDecryptionKeySharesForInnerDealings interface {
+	internal() *verifiedDecryptionKeySharesForInnerDealings
+	codec.Codec[VerifiedDecryptionKeySharesForInnerDealings]
 
-	// Returns the underlying UnverifiedDecryptionKeySharesForInnerDealing instance.
-	AsUnverifiedShares() UnverifiedDecryptionKeySharesForInnerDealing
+	// Returns the underlying UnverifiedDecryptionKeySharesForInnerDealings instance.
+	AsUnverifiedShares() UnverifiedDecryptionKeySharesForInnerDealings
 }
 
 // In contract to the initial dealings types, the VerifiedInnerDealing types represent a correctly verified and
@@ -85,8 +85,8 @@ type VerifiedInnerDealing interface {
 var _ Result = &result{}
 var _ UnverifiedInitialDealing = &unverifiedInitialDealing{}
 var _ VerifiedInitialDealing = &verifiedInitialDealing{}
-var _ UnverifiedDecryptionKeySharesForInnerDealing = &unverifiedDecryptionKeySharesForInnerDealing{}
-var _ VerifiedDecryptionKeySharesForInnerDealing = &verifiedDecryptionKeySharesForInnerDealing{}
+var _ UnverifiedDecryptionKeySharesForInnerDealings = &unverifiedDecryptionKeySharesForInnerDealings{}
+var _ VerifiedDecryptionKeySharesForInnerDealings = &verifiedDecryptionKeySharesForInnerDealings{}
 var _ VerifiedInnerDealing = &verifiedInnerDealing{}
 
 type result struct {
@@ -114,17 +114,17 @@ type verifiedInitialDealing struct {
 // Holds the result of the process where dealer D decrypted all outer dealings OD_D' to obtain the decryption key
 // shares z_{D', D} for all dealers D' in the DKG instance. The number of non-nil entries in z_D is either f_D + 1
 // (fresh dealing) or t_D (re-sharing).
-type decryptionKeySharesForInnerDealing struct {
+type decryptionKeySharesForInnerDealings struct {
 	curve math.Curve
 	z_D   []math.Scalar // len(z_D) == n_D; z_D[D'] == nil iff D' ∉ L
 }
 
-type unverifiedDecryptionKeySharesForInnerDealing struct {
-	base *decryptionKeySharesForInnerDealing
+type unverifiedDecryptionKeySharesForInnerDealings struct {
+	base *decryptionKeySharesForInnerDealings
 }
 
-type verifiedDecryptionKeySharesForInnerDealing struct {
-	base *decryptionKeySharesForInnerDealing
+type verifiedDecryptionKeySharesForInnerDealings struct {
+	base *decryptionKeySharesForInnerDealings
 }
 
 type verifiedInnerDealing struct {
@@ -137,10 +137,10 @@ type verifiedInnerDealing struct {
 func (r *result) internal() *result                                     { return r }
 func (d *unverifiedInitialDealing) internal() *unverifiedInitialDealing { return d }
 func (d *verifiedInitialDealing) internal() *verifiedInitialDealing     { return d }
-func (s *unverifiedDecryptionKeySharesForInnerDealing) internal() *unverifiedDecryptionKeySharesForInnerDealing {
+func (s *unverifiedDecryptionKeySharesForInnerDealings) internal() *unverifiedDecryptionKeySharesForInnerDealings {
 	return s
 }
-func (s *verifiedDecryptionKeySharesForInnerDealing) internal() *verifiedDecryptionKeySharesForInnerDealing {
+func (s *verifiedDecryptionKeySharesForInnerDealings) internal() *verifiedDecryptionKeySharesForInnerDealings {
 	return s
 }
 func (d *verifiedInnerDealing) internal() *verifiedInnerDealing { return d }
@@ -220,6 +220,6 @@ func (d *verifiedInitialDealing) AsUnverifiedDealing() UnverifiedInitialDealing 
 	return &unverifiedInitialDealing{d.OD.AsUnverifiedDealing(), d.EID}
 }
 
-func (s *verifiedDecryptionKeySharesForInnerDealing) AsUnverifiedShares() UnverifiedDecryptionKeySharesForInnerDealing {
-	return &unverifiedDecryptionKeySharesForInnerDealing{s.base}
+func (s *verifiedDecryptionKeySharesForInnerDealings) AsUnverifiedShares() UnverifiedDecryptionKeySharesForInnerDealings {
+	return &unverifiedDecryptionKeySharesForInnerDealings{s.base}
 }

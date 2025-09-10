@@ -2,27 +2,48 @@ package plugin
 
 import (
 	"encoding"
+	"fmt"
 
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
 	"github.com/smartcontractkit/smdkg/internal/codec"
 	"github.com/smartcontractkit/smdkg/internal/crypto/dkg"
 )
 
-var _ codec.Codec[*pluginState] = &pluginState{}
+func (p *pluginStateDealing) MarshalTo(target codec.Target) {
+	target.WriteInt(int(pluginStateTypeDealing))
+	target.WriteInt(p.attempt)
+}
 
-func (s *pluginState) MarshalTo(target codec.Target) {
-	target.WriteInt(int(s.state))
+func (p *pluginStateDecrypting) MarshalTo(target codec.Target) {
+	target.WriteInt(int(pluginStateTypeDecrypting))
+	target.WriteInt(p.attempt)
+}
+
+func (s *pluginStateFinished) MarshalTo(target codec.Target) {
+	target.WriteInt(int(pluginStateTypeFinished))
 	target.WriteInt(s.attempt)
 }
 
-func (s *pluginState) UnmarshalFrom(source codec.Source) *pluginState {
-	s.state = stateMachineState(source.ReadInt())
-	s.attempt = source.ReadInt()
-	return s
+// Implements unmarshaling for a pluginState.
+// If provided, the plugin field of the unmarshaled state to the given value from the unmarshaler.
+type pluginStateUnmarshaler struct {
+	plugin *DKGPlugin
 }
 
-func (s *pluginState) IsNil() bool {
-	return s == nil
+func (u pluginStateUnmarshaler) UnmarshalFrom(source codec.Source) pluginState {
+	pluginStateType := pluginStateType(source.ReadInt())
+	attempt := source.ReadInt()
+
+	switch pluginStateType {
+	case pluginStateTypeDealing:
+		return &pluginStateDealing{u.plugin, attempt}
+	case pluginStateTypeDecrypting:
+		return &pluginStateDecrypting{u.plugin, attempt}
+	case pluginStateTypeFinished:
+		return &pluginStateFinished{u.plugin, attempt}
+	default:
+		panic(fmt.Sprintf("unknown pluginStateType: %v", pluginStateType))
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -91,7 +112,7 @@ func (d decryptionKeyShares) UnmarshalFrom(source codec.Source) decryptionKeySha
 	n := source.ReadInt()
 	d = make(decryptionKeyShares, n)
 	for i := range d {
-		d[i] = codec.ReadOptional(source, dkg.NewVerifiedDecryptionKeySharesForInnerDealing)
+		d[i] = codec.ReadOptional(source, dkg.NewVerifiedDecryptionKeySharesForInnerDealings)
 	}
 	return d
 }

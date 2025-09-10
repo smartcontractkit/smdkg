@@ -76,7 +76,7 @@ func simulateDKG(iid dkgtypes.InstanceID, dkgs []DKG) (Result, error) {
 		}
 	}
 
-	decryptionShares := make([]VerifiedDecryptionKeySharesForInnerDealing, n_D)
+	decryptionShares := make([]VerifiedDecryptionKeySharesForInnerDealings, n_D)
 	for i, dkg := range dkgs[:decryptionThreshold] {
 		decryptionShares[i], err = dkg.DecryptDecryptionKeyShares(initialDealings)
 		if err != nil {

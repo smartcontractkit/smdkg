@@ -4,6 +4,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
 	"github.com/smartcontractkit/smdkg/internal/crypto/dkgtypes"
 	"github.com/smartcontractkit/smdkg/internal/crypto/p256keyringshim"
 	"github.com/smartcontractkit/smdkg/p256keyring"
@@ -24,4 +25,12 @@ func NewP256Keys(t *testing.T, n int, rand io.Reader) ([]dkgtypes.P256Keyring, [
 		eks[i] = krInternal.PublicKey()
 	}
 	return krs, eks
+}
+
+func P256KeysToParticipantPublicKeys(pks []dkgtypes.P256PublicKey) []dkgocrtypes.P256ParticipantPublicKey {
+	participantPublicKeys := make([]dkgocrtypes.P256ParticipantPublicKey, len(pks))
+	for i, pk := range pks {
+		participantPublicKeys[i] = pk.Bytes()
+	}
+	return participantPublicKeys
 }

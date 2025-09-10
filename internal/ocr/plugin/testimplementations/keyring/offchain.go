@@ -3,7 +3,7 @@ package keyring
 import (
 	"crypto/ed25519"
 
-	"github.com/smartcontractkit/libocr/offchainreporting2/types"
+	"github.com/smartcontractkit/libocr/offchainreporting2plus/types"
 	"golang.org/x/crypto/curve25519"
 )
 
