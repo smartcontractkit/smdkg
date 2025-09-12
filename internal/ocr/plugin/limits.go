@@ -117,30 +117,30 @@ func estimateKeyValueModifiedKeysPlusValuesLength(estimator *dkg.BandwidthEstima
 	size := 0
 
 	// pluginState
-	size += len(kv.PluginState()) // key
-	size += codec.IntSize         // value (state)
-	size += codec.IntSize         // value (countRestart)
+	size += len(kv.PluginStateKey()) // key
+	size += codec.IntSize            // value (state)
+	size += codec.IntSize            // value (countRestart)
 
 	// bannedDealers
-	size += len(kv.BannedDealers()) // key
-	size += codec.IntSize           // value (length prefix)
-	size += estimator.N_D * 1       // value (bool per dealer)
+	size += len(kv.BannedDealersKey()) // key
+	size += codec.IntSize              // value (length prefix)
+	size += estimator.N_D * 1          // value (bool per dealer)
 
 	// initialDealings
-	size += len(kv.InitialDealings(0))                            // key
+	size += len(kv.InitialDealingsKey(0))                         // key
 	size += codec.IntSize                                         // value (length prefix)
 	size += estimator.N_D * 1                                     // value (bit mask for nil indicating which dealings are present)
 	size += estimator.EstimatedDealingsThreshold * initialDealing // value (dealings)
 
 	// decryptionKeyShares
-	size += len(kv.DecryptionKeyShares(0))                               // key
+	size += len(kv.DecryptionKeySharesKey(0))                            // key
 	size += codec.IntSize                                                // value (length prefix)
 	size += estimator.N_D * 1                                            // value (bit mask for nil indicating which shares are present)
 	size += estimator.EstimatedDecryptionThreshold * decryptionKeyShares // value (shares)
 
 	// innerDealings
-	size += len(kv.InnerDealings(0)) // key
-	size += innerDealings            // value (estimated size of inner dealings)
+	size += len(kv.InnerDealingsKey(0)) // key
+	size += innerDealings               // value (estimated size of inner dealings)
 
 	return size
 }

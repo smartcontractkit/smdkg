@@ -3,6 +3,7 @@ package onchainkeyring
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/binary"
 
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/ocr3types"
@@ -38,15 +39,21 @@ func (k *OCR3CapabilityCompatibleOnchainKeyring) PublicKey() types.OnchainPublic
 	return OCR3CapabilityCompatibleOnchainPublicKey(k.OffchainKeyring.OffchainPublicKey())
 }
 
-const domainSeparationTag = "San Marino DKG Report"
+const domainSeparationTag = "San Marino DKG v1 Report"
 
+// Computed as domainSeparationTag || sha256(configDigest || seqNr || len(reportWithInfo.Report) || reportWithInfo.Report)
+// We use the scheme of domainSeparationTag || sha256(...) since that matches what libocr does.
 func signatureMessage(configDigest types.ConfigDigest, seqNr uint64, reportWithInfo ocr3types.ReportWithInfo[struct{}]) []byte {
-	msg := make([]byte, 0, len(domainSeparationTag)+len(configDigest)+8+len(reportWithInfo.Report))
+	msg := make([]byte, 0, len(domainSeparationTag)+sha256.Size)
 	msg = append(msg, domainSeparationTag...)
-	msg = append(msg, configDigest[:]...)
-	msg = binary.BigEndian.AppendUint64(msg, seqNr)
-	msg = binary.BigEndian.AppendUint64(msg, uint64(len(reportWithInfo.Report)))
-	msg = append(msg, reportWithInfo.Report...)
+
+	sha := sha256.New()
+	sha.Write(configDigest[:])
+	_ = binary.Write(sha, binary.BigEndian, seqNr)
+	_ = binary.Write(sha, binary.BigEndian, uint64(len(reportWithInfo.Report)))
+	_, _ = sha.Write(reportWithInfo.Report)
+	msg = sha.Sum(msg)
+
 	return msg
 }
 

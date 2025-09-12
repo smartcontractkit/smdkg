@@ -70,8 +70,8 @@ func (f *DKGPluginFactory) NewReportingPlugin(context context.Context,
 
 	// Transform the public keys of dealers from byte slices to dkgtypes.P256PublicKey
 	dealers := make([]dkgtypes.P256PublicKey, len(pluginConfig.DealerPublicKeys))
-	for i, k := range pluginConfig.DealerPublicKeys {
-		dealers[i], err = dkgtypes.NewP256PublicKey(k)
+	for i, pk := range pluginConfig.DealerPublicKeys {
+		dealers[i], err = dkgtypes.NewP256PublicKey(pk)
 		if err != nil {
 			return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to derive dealer %d public key: %w", i, err)
 		}
@@ -79,8 +79,8 @@ func (f *DKGPluginFactory) NewReportingPlugin(context context.Context,
 
 	// Transform the public keys of recipients from byte slices to dkgtypes.P256PublicKey
 	recipients := make([]dkgtypes.P256PublicKey, len(pluginConfig.RecipientPublicKeys))
-	for i, k := range pluginConfig.RecipientPublicKeys {
-		recipients[i], err = dkgtypes.NewP256PublicKey(k)
+	for i, pk := range pluginConfig.RecipientPublicKeys {
+		recipients[i], err = dkgtypes.NewP256PublicKey(pk)
 		if err != nil {
 			return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to derive recipient %d public key: %w", i, err)
 		}

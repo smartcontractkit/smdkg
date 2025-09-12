@@ -14,35 +14,41 @@ import (
 // Note: Read semantics of the underlying ocr3_1types.KeyValueReader are followed, i.e. if no value for a given key
 // exists, the zero value of the corresponding type is returned without an error (and unmarshaling is not attempted).
 
+const pluginStateKey = "PluginState"
+const bannedDealersKey = "BannedDealers"
+const initialDealingsKey = "InitialDealings"
+const decryptionKeySharesKey = "DecryptionKeyShares"
+const innerDealingsKey = "InnerDealings"
+
 type storageKey []byte
 
 // Returns the key/value store key for accessing the plugin state.
-func PluginState() storageKey {
-	return storageKey("PluginState")
+func PluginStateKey() storageKey {
+	return storageKey(pluginStateKey)
 }
 
 // Returns the key/value store key for accessing the banned dealers.
-func BannedDealers() storageKey {
-	return storageKey("BannedDealers")
+func BannedDealersKey() storageKey {
+	return storageKey(bannedDealersKey)
 }
 
 // Returns the key/value store key for accessing initial dealings for a given attempt.
-func InitialDealings(attempt int) storageKey {
-	key := storageKey("0000/InitialDealings")
+func InitialDealingsKey(attempt int) storageKey {
+	key := storageKey("0000/" + initialDealingsKey)
 	binary.BigEndian.PutUint32(key, uint32(attempt))
 	return key
 }
 
 // Returns the key/value store key for accessing decryption key shares for a given attempt.
-func DecryptionKeyShares(attempt int) storageKey {
-	var key = []byte("0000/DecryptionKeyShares")
+func DecryptionKeySharesKey(attempt int) storageKey {
+	var key = []byte("0000/" + decryptionKeySharesKey)
 	binary.BigEndian.PutUint32(key, uint32(attempt))
 	return key
 }
 
 // Returns the key/value store key for accessing inner dealings for a given attempt.
-func InnerDealings(attempt int) storageKey {
-	key := []byte("0000/InnerDealings")
+func InnerDealingsKey(attempt int) storageKey {
+	key := []byte("0000/" + innerDealingsKey)
 	binary.BigEndian.PutUint32(key, uint32(attempt))
 	return key
 }
