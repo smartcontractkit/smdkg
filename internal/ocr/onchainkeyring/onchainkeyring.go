@@ -39,7 +39,7 @@ func (k *OCR3CapabilityCompatibleOnchainKeyring) PublicKey() types.OnchainPublic
 	return OCR3CapabilityCompatibleOnchainPublicKey(k.OffchainKeyring.OffchainPublicKey())
 }
 
-const domainSeparationTag = "San Marino DKG v1 Report"
+const domainSeparationTag = "chain.link/san-marino-dkg/v1/ocr-report"
 
 // Computed as domainSeparationTag || sha256(configDigest || seqNr || len(reportWithInfo.Report) || reportWithInfo.Report)
 // We use the scheme of domainSeparationTag || sha256(...) since that matches what libocr does.

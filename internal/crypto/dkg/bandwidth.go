@@ -36,7 +36,9 @@ type BandwidthEstimator struct {
 
 // Initializes a new BandwidthEstimator with the given parameters.
 // If t_D is nil for a resharing, the estimator will use loose estimates that do not depend on t_D.
-func NewBandwidthEstimator(iid dkgtypes.InstanceID, curve math.Curve, n_D int, f_D int, n_R int, t_R int, isResharing bool, t_D *int) BandwidthEstimator {
+func NewBandwidthEstimator(
+	iid dkgtypes.InstanceID, curve math.Curve, n_D int, f_D int, n_R int, t_R int, isResharing bool, t_D *int,
+) BandwidthEstimator {
 	params := bandwidthParams{iid, curve, n_D, f_D, n_R, t_R, isResharing}
 	e := BandwidthEstimator{params, n_D, f_D, estimates{}}
 	e.estimates = computeEstimates(params, t_D)

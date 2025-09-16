@@ -23,7 +23,7 @@ var p256ParamPNeg1Half = math.NewScalarFromString(
 // relative to the base point is not known. The implementation is NOT constant-time and therefore not suitable for a
 // general-purpose hash-to-curve implementation.
 func NewP256CRS(iid dkgtypes.InstanceID, tag string) (dkgtypes.P256PublicKey, error) {
-	h := xof.New("smartcontract.com/dkg/crs")
+	h := xof.New("chain.link/san-marino-dkg/v1/crs")
 	h.WriteString(string(iid))
 	h.WriteString(tag)
 

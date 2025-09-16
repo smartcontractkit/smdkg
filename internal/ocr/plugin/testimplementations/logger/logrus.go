@@ -9,9 +9,13 @@ type Logger struct {
 	logger *logrus.Logger
 }
 
-func NewLogger() *Logger {
+func NewLogger(hook logrus.Hook) *Logger {
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
+	if hook != nil {
+		logger.AddHook(hook)
+	}
+
 	return &Logger{
 		logger,
 	}

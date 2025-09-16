@@ -171,7 +171,7 @@ func CiphertextSize(n int, totalPlaintextSize int) int {
 }
 
 func h_Enc(i int, ekᵢ dkgtypes.P256PublicKey, Eₒ dkgtypes.P256PublicKey, ekᵢʳ []byte, ad []byte, digestLenBytes int) ([]byte, error) {
-	h := xof.New("smartcontract.com/dkg/mre/hEnc")
+	h := xof.New("chain.link/san-marino-dkg/v1/mre/hEnc")
 	h.WriteInt(i)
 	h.WriteBytes(ekᵢ.Bytes())
 	h.WriteBytes(Eₒ.Bytes())
@@ -186,7 +186,7 @@ func h_Enc(i int, ekᵢ dkgtypes.P256PublicKey, Eₒ dkgtypes.P256PublicKey, ek�
 }
 
 func h_R(r [16]byte) (dkgtypes.P256KeyPair, error) {
-	h := xof.New("smartcontract.com/dkg/mre/hR")
+	h := xof.New("chain.link/san-marino-dkg/v1/mre/hR")
 	h.WriteBytes(r[:])
 	return dkgtypes.NewP256KeyPair(h)
 }

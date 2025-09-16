@@ -414,7 +414,7 @@ func (v *vess) validateResponses(ρ_ωʺ []Scalars, ρ_E []Ciphertext, ρ_seed [
 
 // Computes the hash hExp(t, k, seedₖ, ad).
 func (v *vess) hExp(k int, seedₖ ExpansionSeed, ad []byte) (ExpansionSeed, []Scalar, error) {
-	h := xof.New("smartcontract.com/dkg/vess/hExp")
+	h := xof.New("chain.link/san-marino-dkg/v1/vess/hExp")
 	h.WriteInt(v.t)
 	h.WriteInt(k)
 	h.WriteBytes(seedₖ[:])
@@ -439,7 +439,7 @@ func (v *vess) hExp(k int, seedₖ ExpansionSeed, ad []byte) (ExpansionSeed, []S
 
 // Compute the hash hComp(C'₁, E₁, ..., C'_N, E_N, ad).
 func (v *vess) hComp(Cꞌ [][]Point, E []Ciphertext, ad []byte) []byte {
-	h := xof.New("smartcontract.com/dkg/vess/hComp")
+	h := xof.New("chain.link/san-marino-dkg/v1/vess/hComp")
 	for i, Cꞌᵢ := range Cꞌ {
 		for _, Cꞌᵢⱼ := range Cꞌᵢ {
 			h.WriteBytes(Cꞌᵢⱼ.Bytes())
@@ -457,7 +457,7 @@ func (v *vess) hComp(Cꞌ [][]Point, E []Ciphertext, ad []byte) []byte {
 // N... repetition count
 // M... size of the subset to be selected
 func (v *vess) hCh(C []Point, h []byte, ad []byte) ([]bool, error) {
-	hasher := xof.New("smartcontract.com/dkg/vess/hCh")
+	hasher := xof.New("chain.link/san-marino-dkg/v1/vess/hCh")
 	hasher.WriteInt(v.N)
 	hasher.WriteInt(v.M)
 	for _, Cᵢ := range C {

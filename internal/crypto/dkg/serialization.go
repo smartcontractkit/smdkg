@@ -21,14 +21,16 @@ func (r *result) IsNil() bool {
 }
 
 func (r *result) MarshalTo(target codec.Target) {
-	t := r.t_R
-	n := len(r.y_R)
+	t_R := r.t_R
+	n_R := len(r.y_R)
 
 	target.WriteString(string(r.iid))
 	r.curve.MarshalTo(target)
-	target.WriteInt(t)
-	target.WriteInt(n)
-	target.WriteInt(len(r.Lꞌ))
+	target.WriteInt(t_R)
+	target.WriteInt(n_R)
+
+	n_D := len(r.Lꞌ)
+	target.WriteInt(n_D)
 
 	for _, ID := range r.Lꞌ {
 		target.WriteOptional(ID)
@@ -46,26 +48,26 @@ func (r *result) MarshalTo(target codec.Target) {
 func (r *result) UnmarshalFrom(source codec.Source) Result {
 	r.iid = dkgtypes.InstanceID(source.ReadString())
 	r.curve = math.UnmarshalCurve(source)
-	t := source.ReadNonNegativeInt()
-	n := source.ReadNonNegativeInt()
-	l := source.ReadNonNegativeInt() // TODO: add lengths checks for l
+	t_R := source.ReadNonNegativeInt()
+	n_R := source.ReadNonNegativeInt()
+	n_D := source.ReadNonNegativeInt()
 
-	if t < 1 || n < t {
-		panic(fmt.Sprintf("result.UnmarshalFrom: invalid parameters (n=%d, t=%d)", n, t))
+	if t_R < 1 || n_R < t_R {
+		panic(fmt.Sprintf("result.UnmarshalFrom: invalid parameters (n=%d, t=%d)", n_R, t_R))
 	}
 
-	r.t_R = t
-	r.Lꞌ = make([]VerifiedInnerDealing, l)
-	for i := 0; i < l; i++ {
-		r.Lꞌ[i] = codec.ReadOptional(source, NewVerifiedInnerDealing)
+	r.t_R = t_R
+	r.Lꞌ = make([]VerifiedInnerDealing, 0)
+	for i := 0; i < n_D; i++ {
+		r.Lꞌ = append(r.Lꞌ, codec.ReadOptional(source, NewVerifiedInnerDealing))
 	}
 
 	r.y = r.curve.Point()
 	r.y.UnmarshalFrom(source)
 
-	r.y_R = make([]math.Point, n)
-	for i := 0; i < n; i++ {
-		r.y_R[i] = r.curve.Point().UnmarshalFrom(source)
+	r.y_R = make([]math.Point, 0)
+	for i := 0; i < n_R; i++ {
+		r.y_R = append(r.y_R, r.curve.Point().UnmarshalFrom(source))
 	}
 
 	r.wasReshared = source.ReadBool()
@@ -143,10 +145,10 @@ func (ds *decryptionKeySharesForInnerDealings) UnmarshalFrom(source codec.Source
 	ds.curve = math.UnmarshalCurve(source)
 
 	numShares := source.ReadInt()
-	ds.z_D = make([]math.Scalar, numShares)
+	ds.z_D = make([]math.Scalar, 0)
 
 	for i := 0; i < numShares; i++ {
-		ds.z_D[i] = codec.ReadOptional(source, ds.curve.Scalar)
+		ds.z_D = append(ds.z_D, codec.ReadOptional(source, ds.curve.Scalar))
 	}
 
 	return ds

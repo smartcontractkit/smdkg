@@ -292,8 +292,8 @@ func (dkg *dkg) VerifyInitialDealing(initialDealing UnverifiedInitialDealing, D�
 
 func (dkg *dkg) DecryptDecryptionKeyShares(L []VerifiedInitialDealing) (VerifiedDecryptionKeySharesForInnerDealings, error) {
 	n_D := len(dkg.dealers)
-	if len(L) != n_D {
-		return nil, fmt.Errorf("invalid dealings list length: expected %d, got %d", n_D, len(L))
+	if err := dkg.checkVerifiedInitialDealings(L); err != nil {
+		return nil, err
 	}
 
 	// z_D will be filled with the decryption key shares z_{D', D} for all D' ∈ L.
@@ -332,9 +332,10 @@ func (dkg *dkg) VerifyDecryptionKeyShares(
 			"mismatching curves: DKG uses %s, decryption key shares use %s", dkg.curve.Name(), curve.Name(),
 		)
 	}
-	if len(L) != n_D {
-		return nil, fmt.Errorf("invalid dealings list length: expected %d, got %d", n_D, len(L))
+	if err := dkg.checkVerifiedInitialDealings(L); err != nil {
+		return nil, err
 	}
+
 	if len(z_Dˣ) != n_D {
 		return nil, fmt.Errorf("invalid decryption key shares length: expected %d, got %d", len(dkg.dealers), len(z_Dˣ))
 	}
@@ -360,8 +361,8 @@ func (dkg *dkg) RecoverInnerDealings(L []VerifiedInitialDealing, z []VerifiedDec
 	Lꞌ []VerifiedInnerDealing, B IndicesOfBadDealers, restartRequired bool, err error,
 ) {
 	n_D := len(dkg.dealers)
-	if len(L) != n_D {
-		return nil, nil, false, fmt.Errorf("invalid dealings list length: expected %d, got %d", n_D, len(L))
+	if err := dkg.checkVerifiedInitialDealings(L); err != nil {
+		return nil, nil, false, err
 	}
 	if len(z) != len(dkg.dealers) {
 		return nil, nil, false, fmt.Errorf("invalid decryption key shares list length: expected %d, got %d", n_D, len(z))
@@ -436,10 +437,15 @@ func (dkg *dkg) RecoverInnerDealings(L []VerifiedInitialDealing, z []VerifiedDec
 		numValidInnerDealings++
 	}
 
-	if numValidInnerDealings == 0 {
-		// No valid inner dealings could be recovered. This should only ever happen due to a threshold violation.
-		return nil, B, restartRequired, fmt.Errorf("no valid inner dealings could be recovered")
+	if numValidInnerDealings == 0 || len(B) > dkg.f_D {
+		// This should only ever happen due to a threshold violation. For fresh dealings, the above conditions are
+		// equivalent, however for re-sharing with t_D > f_D + 1, we also want to abort if too many bad dealings were
+		// detected (although there might be a valid one).
+		return nil, B, restartRequired, fmt.Errorf(
+			"recover of inner dealings failed, to many bad dealers: expected at most %d, got %d", dkg.f_D, len(B),
+		)
 	}
+
 	return Lꞌ, B, restartRequired, nil
 }
 
@@ -549,10 +555,33 @@ func (dkg *dkg) decryptAndVerifyInnerDealing(Dꞌ int, EID_Dꞌ []byte, z_Dꞌ m
 	return ID_Dꞌ_verified, nil
 }
 
+// Checks if the given list of verified initial dealings L is of the expected length (n_D), and contains exactly
+// dkg.DealingsThreshold() non-nil entries.
+func (dkg *dkg) checkVerifiedInitialDealings(L []VerifiedInitialDealing) error {
+	n_D := len(dkg.dealers)
+	if len(L) != n_D {
+		return fmt.Errorf("invalid dealings list length: expected %d, got %d", n_D, len(L))
+	}
+
+	numNonNil := 0
+	for _, dealing := range L {
+		if dealing != nil {
+			numNonNil++
+		}
+	}
+
+	if numNonNil < dkg.DealingsThreshold() {
+		return fmt.Errorf(
+			"invalid number of dealings: expected less  %d non-nil entries, got %d", dkg.DealingsThreshold(), numNonNil,
+		)
+	}
+	return nil
+}
+
 // Setup associated data for the use with VESS.
 // Specifically, ad := (iid, tag, D), where tag ∈ { "inner", "outer" }.
 func hAd(iid dkgtypes.InstanceID, tag string, D int) []byte {
-	h := xof.New("smartcontract.com/dkg/hAd")
+	h := xof.New("chain.link/san-marino-dkg/v1/hAd")
 	h.WriteString(string(iid))
 	h.WriteString(tag)
 	h.WriteInt(D)
@@ -562,7 +591,7 @@ func hAd(iid dkgtypes.InstanceID, tag string, D int) []byte {
 // The hash is used to derive the one-time pad for encrypting the inner dealing package.
 // Specifically, it computes H^l_deal(iid, D, z_D), where l is specified in bytes using digestLength.
 func hDeal(iid dkgtypes.InstanceID, D int, z_D math.Scalar, digestLength int) []byte {
-	h := xof.New("smartcontract.com/dkg/hDeal")
+	h := xof.New("chain.link/san-marino-dkg/v1/hDeal")
 	h.WriteString(string(iid))
 	h.WriteInt(D)
 	h.WriteBytes(z_D.Bytes())

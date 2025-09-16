@@ -80,33 +80,33 @@ func (d *UnverifiedDealing) UnmarshalFrom(source codec.Source) *UnverifiedDealin
 		panic(fmt.Sprintf("dealing.UnmarshalFrom: invalid parameters t=%d, N=%d, M=%d", t, N, M))
 	}
 
-	C := make(PolynomialCommitment, t)
-	for k := range C {
+	C := make(PolynomialCommitment, 0)
+	for k := 0; k < t; k++ {
 		Cₖ := curve.Point()
 		Cₖ.UnmarshalFrom(source)
-		C[k] = Cₖ
+		C = append(C, Cₖ)
 	}
 	d.c = C
 
 	d.h = source.ReadBytes(xof.DigestLength)
 
-	d.ρ_ωʺ = make([]math.Scalars, M)
-	d.ρ_E = make([]Ciphertext, M)
-	for i := range d.ρ_ωʺ {
-		ρ_wʺ := make(math.Scalars, t)
-		for j := range ρ_wʺ {
-			ρ_wʺ[j] = curve.Scalar()
+	d.ρ_ωʺ = make([]math.Scalars, 0)
+	d.ρ_E = make([]Ciphertext, 0)
+	for i := 0; i < M; i++ {
+		ρ_wʺ := make(math.Scalars, 0)
+		for j := 0; j < t; j++ {
+			ρ_wʺ = append(ρ_wʺ, curve.Scalar())
 			ρ_wʺ[j].UnmarshalFrom(source)
 		}
-		d.ρ_ωʺ[i] = ρ_wʺ
-		d.ρ_E[i] = source.ReadLengthPrefixedBytes()
+		d.ρ_ωʺ = append(d.ρ_ωʺ, ρ_wʺ)
+		d.ρ_E = append(d.ρ_E, source.ReadLengthPrefixedBytes())
 	}
 
-	d.ρ_seed = make([]ExpansionSeed, N-M)
-	for i := range d.ρ_seed {
+	d.ρ_seed = make([]ExpansionSeed, 0)
+	for i := 0; i < N-M; i++ {
 		var seedᵢ ExpansionSeed
 		source.ReadBytesInto(seedᵢ[:])
-		d.ρ_seed[i] = seedᵢ
+		d.ρ_seed = append(d.ρ_seed, seedᵢ)
 	}
 
 	return d

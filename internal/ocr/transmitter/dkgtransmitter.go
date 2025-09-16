@@ -9,7 +9,7 @@ import (
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/types"
 
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
-	"github.com/smartcontractkit/smdkg/internal/ocr/plugin"
+	"github.com/smartcontractkit/smdkg/internal/ocr/plugin/plugintypes"
 )
 
 var _ ocr3types.ContractTransmitter[struct{}] = &Transmitter{}
@@ -30,7 +30,7 @@ func (t *Transmitter) Transmit(
 	// no need to check signatures since libocr already handled that for us
 
 	// unmarshal report into dealingPackage
-	dealingPackage := &plugin.ResultPackage{}
+	dealingPackage := &plugintypes.ResultPackage{}
 	err := dealingPackage.UnmarshalBinary(report.Report)
 	if err != nil {
 		return fmt.Errorf("unmarshal dealing package: %w", err)

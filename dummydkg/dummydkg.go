@@ -11,7 +11,7 @@ import (
 	"github.com/smartcontractkit/smdkg/internal/crypto/dkgtypes"
 	"github.com/smartcontractkit/smdkg/internal/crypto/math"
 	"github.com/smartcontractkit/smdkg/internal/crypto/p256keyringshim"
-	"github.com/smartcontractkit/smdkg/internal/ocr/plugin"
+	"github.com/smartcontractkit/smdkg/internal/ocr/plugin/plugintypes"
 	"github.com/smartcontractkit/smdkg/internal/testimplementations/unsaferand"
 	"github.com/smartcontractkit/smdkg/p256keyring"
 )
@@ -119,5 +119,5 @@ func NewResultPackage(
 		return nil, err
 	}
 
-	return &plugin.ResultPackage{result, &config}, nil
+	return &plugintypes.ResultPackage{result, &config}, nil
 }

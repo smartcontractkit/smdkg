@@ -117,7 +117,7 @@ func estimateKeyValueModifiedKeysPlusValuesLength(estimator *dkg.BandwidthEstima
 	size := 0
 
 	// pluginState
-	size += len(kv.PluginStateKey()) // key
+	size += len(kv.PluginPhaseKey()) // key
 	size += codec.IntSize            // value (state)
 	size += codec.IntSize            // value (countRestart)
 

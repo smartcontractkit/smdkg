@@ -14,7 +14,7 @@ import (
 // Note: Read semantics of the underlying ocr3_1types.KeyValueReader are followed, i.e. if no value for a given key
 // exists, the zero value of the corresponding type is returned without an error (and unmarshaling is not attempted).
 
-const pluginStateKey = "PluginState"
+const pluginPhaseKey = "PluginPhase"
 const bannedDealersKey = "BannedDealers"
 const initialDealingsKey = "InitialDealings"
 const decryptionKeySharesKey = "DecryptionKeyShares"
@@ -23,8 +23,8 @@ const innerDealingsKey = "InnerDealings"
 type storageKey []byte
 
 // Returns the key/value store key for accessing the plugin state.
-func PluginStateKey() storageKey {
-	return storageKey(pluginStateKey)
+func PluginPhaseKey() storageKey {
+	return storageKey(pluginPhaseKey)
 }
 
 // Returns the key/value store key for accessing the banned dealers.
