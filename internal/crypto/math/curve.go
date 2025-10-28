@@ -32,6 +32,7 @@ type Curve interface {
 	// c.ScalarBytes() returns the number of bytes used to encode a scalar (mod the group's order).
 	ScalarBytes() int
 
-	// c.PointBytes() returns the number of bytes used to encode a point on the curve.
+	// c.PointBytes() returns the maximum number of bytes used to encode a point on the curve. The neutral point
+	// (point at infinity) may use a different (smaller) number of bytes for its encoding.
 	PointBytes() int
 }

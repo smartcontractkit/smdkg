@@ -22,6 +22,10 @@ func (v *P224Point) New() Point {
 	return &P224Point{*nistec.NewP224Point()}
 }
 
+func (v *P224Point) Identity() Point {
+	return &P224Point{*nistec.NewP224Point()}
+}
+
 func (v *P224Point) Clone() Point {
 	return &P224Point{*nistec.NewP224Point().Set(&v.value)}
 }
@@ -53,7 +57,7 @@ func (v *P224Point) ScalarMult(x Scalar, q Point) Point {
 }
 
 func (v *P224Point) Equal(q Point) bool {
-	return subtle.ConstantTimeCompare(v.value.BytesCompressed(), q.(*P224Point).value.BytesCompressed()) == 1
+	return v.value.Equal(&q.(*P224Point).value) == 1
 }
 
 func (v *P224Point) Bytes() []byte {
@@ -65,7 +69,7 @@ func (v *P224Point) BytesUncompressed() []byte {
 }
 
 func (v *P224Point) SetBytes(x []byte) (Point, error) {
-	if len(x) != p224CompressedLength {
+	if len(x) > p224CompressedLength {
 		return nil, fmt.Errorf("invalid P224 point length: %d, expected: %d (compressed format)", len(x), p224CompressedLength)
 	}
 	_, err := v.value.SetBytes(x)
@@ -80,13 +84,12 @@ func (v *P224Point) SetBytes(x []byte) (Point, error) {
 }
 
 func (v *P224Point) MarshalTo(target codec.Target) {
-	target.WriteBytes(v.value.BytesCompressed())
+	target.WriteLengthPrefixedBytes(v.value.BytesCompressed())
 }
 
 func (v *P224Point) UnmarshalFrom(source codec.Source) Point {
-	var buf [p224CompressedLength]byte
-	source.ReadBytesInto(buf[:])
-	_, err := v.value.SetBytes(buf[:])
+	buf := source.ReadLengthPrefixedBytes()
+	_, err := v.value.SetBytes(buf)
 	if err != nil {
 		panic("failed to unmarshal P224 point: " + err.Error())
 	}
@@ -109,6 +112,10 @@ func (v *P256Point) Curve() Curve {
 }
 
 func (v *P256Point) New() Point {
+	return &P256Point{*nistec.NewP256Point()}
+}
+
+func (v *P256Point) Identity() Point {
 	return &P256Point{*nistec.NewP256Point()}
 }
 
@@ -143,7 +150,7 @@ func (v *P256Point) ScalarMult(x Scalar, q Point) Point {
 }
 
 func (v *P256Point) Equal(q Point) bool {
-	return subtle.ConstantTimeCompare(v.value.BytesCompressed(), q.(*P256Point).value.BytesCompressed()) == 1
+	return v.value.Equal(&q.(*P256Point).value) == 1
 }
 
 func (v *P256Point) Bytes() []byte {
@@ -155,7 +162,7 @@ func (v *P256Point) BytesUncompressed() []byte {
 }
 
 func (v *P256Point) SetBytes(x []byte) (Point, error) {
-	if len(x) != p256CompressedLength {
+	if len(x) > p256CompressedLength {
 		return nil, fmt.Errorf("invalid P256 point length: %d, expected: %d (compressed format)", len(x), p256CompressedLength)
 	}
 	_, err := v.value.SetBytes(x)
@@ -170,13 +177,12 @@ func (v *P256Point) SetBytes(x []byte) (Point, error) {
 }
 
 func (v *P256Point) MarshalTo(target codec.Target) {
-	target.WriteBytes(v.value.BytesCompressed())
+	target.WriteLengthPrefixedBytes(v.value.BytesCompressed())
 }
 
 func (v *P256Point) UnmarshalFrom(source codec.Source) Point {
-	var buf [p256CompressedLength]byte
-	source.ReadBytesInto(buf[:])
-	_, err := v.value.SetBytes(buf[:])
+	buf := source.ReadLengthPrefixedBytes()
+	_, err := v.value.SetBytes(buf)
 	if err != nil {
 		panic("failed to unmarshal P256 point: " + err.Error())
 	}
@@ -199,6 +205,10 @@ func (v *P384Point) Curve() Curve {
 }
 
 func (v *P384Point) New() Point {
+	return &P384Point{*nistec.NewP384Point()}
+}
+
+func (v *P384Point) Identity() Point {
 	return &P384Point{*nistec.NewP384Point()}
 }
 
@@ -233,7 +243,7 @@ func (v *P384Point) ScalarMult(x Scalar, q Point) Point {
 }
 
 func (v *P384Point) Equal(q Point) bool {
-	return subtle.ConstantTimeCompare(v.value.BytesCompressed(), q.(*P384Point).value.BytesCompressed()) == 1
+	return v.value.Equal(&q.(*P384Point).value) == 1
 }
 
 func (v *P384Point) Bytes() []byte {
@@ -245,7 +255,7 @@ func (v *P384Point) BytesUncompressed() []byte {
 }
 
 func (v *P384Point) SetBytes(x []byte) (Point, error) {
-	if len(x) != p384CompressedLength {
+	if len(x) > p384CompressedLength {
 		return nil, fmt.Errorf("invalid P384 point length: %d, expected: %d (compressed format)", len(x), p384CompressedLength)
 	}
 	_, err := v.value.SetBytes(x)
@@ -260,13 +270,12 @@ func (v *P384Point) SetBytes(x []byte) (Point, error) {
 }
 
 func (v *P384Point) MarshalTo(target codec.Target) {
-	target.WriteBytes(v.value.BytesCompressed())
+	target.WriteLengthPrefixedBytes(v.value.BytesCompressed())
 }
 
 func (v *P384Point) UnmarshalFrom(source codec.Source) Point {
-	var buf [p384CompressedLength]byte
-	source.ReadBytesInto(buf[:])
-	_, err := v.value.SetBytes(buf[:])
+	buf := source.ReadLengthPrefixedBytes()
+	_, err := v.value.SetBytes(buf)
 	if err != nil {
 		panic("failed to unmarshal P384 point: " + err.Error())
 	}
@@ -289,6 +298,10 @@ func (v *P521Point) Curve() Curve {
 }
 
 func (v *P521Point) New() Point {
+	return &P521Point{*nistec.NewP521Point()}
+}
+
+func (v *P521Point) Identity() Point {
 	return &P521Point{*nistec.NewP521Point()}
 }
 
@@ -323,7 +336,7 @@ func (v *P521Point) ScalarMult(x Scalar, q Point) Point {
 }
 
 func (v *P521Point) Equal(q Point) bool {
-	return subtle.ConstantTimeCompare(v.value.BytesCompressed(), q.(*P521Point).value.BytesCompressed()) == 1
+	return v.value.Equal(&q.(*P521Point).value) == 1
 }
 
 func (v *P521Point) Bytes() []byte {
@@ -335,7 +348,7 @@ func (v *P521Point) BytesUncompressed() []byte {
 }
 
 func (v *P521Point) SetBytes(x []byte) (Point, error) {
-	if len(x) != p521CompressedLength {
+	if len(x) > p521CompressedLength {
 		return nil, fmt.Errorf("invalid P521 point length: %d, expected: %d (compressed format)", len(x), p521CompressedLength)
 	}
 	_, err := v.value.SetBytes(x)
@@ -350,13 +363,12 @@ func (v *P521Point) SetBytes(x []byte) (Point, error) {
 }
 
 func (v *P521Point) MarshalTo(target codec.Target) {
-	target.WriteBytes(v.value.BytesCompressed())
+	target.WriteLengthPrefixedBytes(v.value.BytesCompressed())
 }
 
 func (v *P521Point) UnmarshalFrom(source codec.Source) Point {
-	var buf [p521CompressedLength]byte
-	source.ReadBytesInto(buf[:])
-	_, err := v.value.SetBytes(buf[:])
+	buf := source.ReadLengthPrefixedBytes()
+	_, err := v.value.SetBytes(buf)
 	if err != nil {
 		panic("failed to unmarshal P521 point: " + err.Error())
 	}
@@ -370,40 +382,49 @@ func (v *P521Point) IsNil() bool {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-type Edward25519Point struct {
+// L-1, from filippo.io/edwards25519/scalar.go
+// Used for subgroup check.
+var edwards25519_scalarMinusOneBytes = [32]byte{236, 211, 245, 92, 26, 99, 18, 88, 214, 156, 247, 162, 222, 249, 222, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16}
+var edwards25519_scalarMinusOne, _ = edwards25519.NewScalar().SetCanonicalBytes(edwards25519_scalarMinusOneBytes[:])
+
+type Edwards25519Point struct {
 	value edwards25519.Point
 }
 
-func (v *Edward25519Point) Curve() Curve {
+func (v *Edwards25519Point) Curve() Curve {
 	return Edwards25519
 }
 
-func (v *Edward25519Point) New() Point {
-	return &Edward25519Point{}
+func (v *Edwards25519Point) New() Point {
+	return &Edwards25519Point{}
 }
 
-func (v *Edward25519Point) Clone() Point {
-	var copy Edward25519Point
+func (v *Edwards25519Point) Identity() Point {
+	return &Edwards25519Point{*edwards25519.NewIdentityPoint()}
+}
+
+func (v *Edwards25519Point) Clone() Point {
+	var copy Edwards25519Point
 	copy.value.Set(&v.value)
 	return &copy
 }
 
-func (v *Edward25519Point) Set(u Point) Point {
-	v.value.Set(&u.(*Edward25519Point).value)
+func (v *Edwards25519Point) Set(u Point) Point {
+	v.value.Set(&u.(*Edwards25519Point).value)
 	return v
 }
 
-func (v *Edward25519Point) Add(p Point, q Point) Point {
-	v.value.Add(&p.(*Edward25519Point).value, &q.(*Edward25519Point).value)
+func (v *Edwards25519Point) Add(p Point, q Point) Point {
+	v.value.Add(&p.(*Edwards25519Point).value, &q.(*Edwards25519Point).value)
 	return v
 }
 
-func (v *Edward25519Point) Subtract(p Point, q Point) Point {
-	v.value.Subtract(&p.(*Edward25519Point).value, &q.(*Edward25519Point).value)
+func (v *Edwards25519Point) Subtract(p Point, q Point) Point {
+	v.value.Subtract(&p.(*Edwards25519Point).value, &q.(*Edwards25519Point).value)
 	return v
 }
 
-func (v *Edward25519Point) ScalarBaseMult(x Scalar) Point {
+func (v *Edwards25519Point) ScalarBaseMult(x Scalar) Point {
 	xBytes := x.Bytes()
 	slices.Reverse(xBytes) // edwards25519 expects little-endian, while Scalar is big-endian
 	xConverted, err := edwards25519.NewScalar().SetCanonicalBytes(xBytes)
@@ -415,7 +436,7 @@ func (v *Edward25519Point) ScalarBaseMult(x Scalar) Point {
 	return v
 }
 
-func (v *Edward25519Point) ScalarMult(x Scalar, q Point) Point {
+func (v *Edwards25519Point) ScalarMult(x Scalar, q Point) Point {
 	xBytes := x.Bytes()
 	slices.Reverse(xBytes) // edwards25519 expects little-endian, while Scalar is big-endian
 	xConverted, err := edwards25519.NewScalar().SetCanonicalBytes(xBytes)
@@ -423,44 +444,51 @@ func (v *Edward25519Point) ScalarMult(x Scalar, q Point) Point {
 		// This should never happen, as a compatible instance of the Scalar abstraction will always be valid.
 		panic("invalid scalar bytes: " + err.Error())
 	}
-	_ = v.value.ScalarMult(xConverted, &q.(*Edward25519Point).value)
+	_ = v.value.ScalarMult(xConverted, &q.(*Edwards25519Point).value)
 	return v
 }
 
-func (v *Edward25519Point) Equal(q Point) bool {
-	return subtle.ConstantTimeCompare(v.Bytes(), q.(*Edward25519Point).Bytes()) == 1
+func (v *Edwards25519Point) Equal(q Point) bool {
+	return v.value.Equal(&q.(*Edwards25519Point).value) == 1
 }
 
-func (v *Edward25519Point) Bytes() []byte {
+func (v *Edwards25519Point) Bytes() []byte {
 	return v.value.Bytes()
 }
 
-func (v *Edward25519Point) SetBytes(x []byte) (Point, error) {
+func (v *Edwards25519Point) SetBytes(x []byte) (Point, error) {
 	_, err := v.value.SetBytes(x)
 	if err != nil {
 		return nil, err
 	}
-
+	if v.IsInPrimeSubgroup() != 1 {
+		return nil, fmt.Errorf("invalid Edwards25519 point: not in prime subgroup")
+	}
 	if subtle.ConstantTimeCompare(v.value.Bytes(), x) != 1 {
 		return nil, fmt.Errorf("invalid Edwards25519 point: not in canonical form")
 	}
 	return v, nil
 }
 
-func (v *Edward25519Point) MarshalTo(target codec.Target) {
-	target.WriteBytes(v.value.Bytes())
+func (v *Edwards25519Point) MarshalTo(target codec.Target) {
+	target.WriteLengthPrefixedBytes(v.value.Bytes())
 }
 
-func (v *Edward25519Point) UnmarshalFrom(source codec.Source) Point {
-	var buf [edwards25519CompressedLength]byte
-	source.ReadBytesInto(buf[:])
-	_, err := v.value.SetBytes(buf[:])
+func (v *Edwards25519Point) UnmarshalFrom(source codec.Source) Point {
+	buf := source.ReadLengthPrefixedBytes()
+	_, err := v.value.SetBytes(buf)
 	if err != nil {
 		panic("failed to unmarshal Edwards25519 point: " + err.Error())
 	}
 	return v
 }
 
-func (v *Edward25519Point) IsNil() bool {
+func (v *Edwards25519Point) IsNil() bool {
 	return v == nil
+}
+
+func (v *Edwards25519Point) IsInPrimeSubgroup() int {
+	p := new(edwards25519.Point).ScalarMult(edwards25519_scalarMinusOne, &v.value)
+	p.Add(p, &v.value)
+	return p.Equal(edwards25519.NewIdentityPoint())
 }

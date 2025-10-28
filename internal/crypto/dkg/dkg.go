@@ -82,6 +82,12 @@ type DKG interface {
 
 	// Derive the DKG's results from the given list of verified inner dealings (i.e., for all D ∈ L').
 	NewResult(Lꞌ []VerifiedInnerDealing) (Result, error)
+
+	// Returns the attempt counter set for this instance.
+	// For fresh DKG instances, this is always 0.
+	// For re-sharing DKG instances, the returne value corresponds to the number of re-sharing attempts so far (zero,
+	// is used for the first re-sharing attempt, 1 when the re-sharing is restarted once, ...).
+	Attempt() int
 }
 
 // Initial structure of a DKG instance, all fields are kept constant after initialization.
@@ -97,6 +103,7 @@ type dkg struct {
 	dealerIndex   int                      // index of the local node within the list of dealers
 	dealerKeyring dkgtypes.P256Keyring     // keyring of the local node, used for decrypting shares
 	priorResult   *result                  // prior result, if this is a re-sharing DKG instance
+	attempt       int                      // attempt counter, 0 for fresh DKG, i for the i-th re-sharing attempt
 }
 
 // Initializes a new (stateless) DKG instance for the given instance ID, to share a new (randomly generated) master
@@ -122,7 +129,7 @@ func NewInitialDKG(
 	t_R int,
 	keyring dkgtypes.P256Keyring,
 ) (DKG, error) {
-	return newDKG(iid, curve, dealers, recipients, f_D, t_R, keyring, nil)
+	return newDKG(iid, curve, dealers, recipients, f_D, t_R, keyring, nil, 0)
 }
 
 // Initializes a new (stateless) DKG instance for the given instance ID, to re-share the master secret key, previously
@@ -148,8 +155,9 @@ func NewResharingDKG(
 	t_R int,
 	keyring dkgtypes.P256Keyring,
 	priorResult Result,
+	attempt int,
 ) (DKG, error) {
-	return newDKG(iid, priorResult.Curve(), dealers, recipients, f_D, t_R, keyring, priorResult)
+	return newDKG(iid, priorResult.Curve(), dealers, recipients, f_D, t_R, keyring, priorResult, attempt)
 }
 
 func newDKG(
@@ -161,6 +169,7 @@ func newDKG(
 	t_R int,
 	keyring dkgtypes.P256Keyring,
 	priorResult Result,
+	attempt int,
 ) (DKG, error) {
 	vessInner, err1 := vess.NewVESS(curve, iid, "inner", len(recipients), t_R, recipients)
 	vessOuter, err2 := vess.NewVESS(curve, iid, "outer", len(dealers), f_D+1, dealers)
@@ -187,7 +196,9 @@ func newDKG(
 		prior = priorResult.internal()
 	}
 
-	return &dkg{iid, curve, vessInner, vessOuter, f_D, t_R, dealers, recipients, dealerIndex, keyring, prior}, nil
+	return &dkg{
+		iid, curve, vessInner, vessOuter, f_D, t_R, dealers, recipients, dealerIndex, keyring, prior, attempt,
+	}, nil
 }
 
 func (dkg *dkg) internal() *dkg {
@@ -222,6 +233,10 @@ func (dkg *dkg) DecryptionThreshold() int {
 	return dkg.f_D + 1
 }
 
+func (dkg *dkg) Attempt() int {
+	return dkg.attempt
+}
+
 func (dkg *dkg) Deal(rand io.Reader) (VerifiedInitialDealing, error) {
 	var s_D math.Scalar
 	if dkg.priorResult == nil {
@@ -240,7 +255,7 @@ func (dkg *dkg) Deal(rand io.Reader) (VerifiedInitialDealing, error) {
 
 	// Create the inner dealing ID_D that t_R out of n_R secret-shares s_D to the recipients R.
 	// ID_D <-- VESS.Deal(s_D, R, t_R, ek_R ad), where ad := H_ad(iid, "inner", D).
-	ad := hAd(dkg.iid, "inner", dkg.dealerIndex)
+	ad := hAd(dkg.iid, "inner", dkg.dealerIndex, dkg.attempt)
 	ID_D, err := dkg.vessInner.Deal(s_D, ad, rand)
 	if err != nil {
 		return nil, err
@@ -252,7 +267,7 @@ func (dkg *dkg) Deal(rand io.Reader) (VerifiedInitialDealing, error) {
 	if err != nil {
 		return nil, err
 	}
-	ad = hAd(dkg.iid, "outer", dkg.dealerIndex)
+	ad = hAd(dkg.iid, "outer", dkg.dealerIndex, dkg.attempt)
 	OD_D, err := dkg.vessOuter.Deal(z_D, ad, rand)
 	if err != nil {
 		return nil, err
@@ -275,7 +290,7 @@ func (dkg *dkg) VerifyInitialDealing(initialDealing UnverifiedInitialDealing, D�
 
 	// Outer dealing, verified in this step.
 	OD_Dꞌ := initialDealing.internal().OD
-	ad := hAd(dkg.iid, "outer", Dꞌ)
+	ad := hAd(dkg.iid, "outer", Dꞌ, dkg.attempt)
 	OD_Dꞌ_verified, err := dkg.vessOuter.VerifyDealing(OD_Dꞌ, ad)
 	if err != nil {
 		return nil, err
@@ -305,7 +320,7 @@ func (dkg *dkg) DecryptDecryptionKeyShares(L []VerifiedInitialDealing) (Verified
 		}
 
 		OD_Dꞌ := L_Dꞌ.internal().OD
-		ad := hAd(dkg.iid, "outer", Dꞌ)
+		ad := hAd(dkg.iid, "outer", Dꞌ, dkg.attempt)
 		z_Dꞌ_D, err := dkg.vessOuter.Decrypt(dkg.dealerIndex, dkg.dealerKeyring, OD_Dꞌ, ad)
 		if err != nil {
 			// This should not happen, as we only invoke the decryption on dealings which previously passed
@@ -454,7 +469,13 @@ func (dkg *dkg) NewResult(Lꞌ []VerifiedInnerDealing) (Result, error) {
 		return nil, fmt.Errorf("invalid inner dealings list length: expected %d, got %d", len(dkg.dealers), len(Lꞌ))
 	}
 
-	t_R := dkg.t_R
+	resharing := dkg.priorResult != nil
+	return newResult(dkg.iid, dkg.curve, len(dkg.recipients), dkg.t_R, resharing, Lꞌ, dkg.attempt)
+}
+
+func newResult(
+	iid dkgtypes.InstanceID, curve math.Curve, n_R int, t_R int, resharing bool, Lꞌ []VerifiedInnerDealing, attempt int,
+) (Result, error) {
 	C := make(math.PolynomialCommitment, t_R)
 	C_Lꞌ := make([]math.PolynomialCommitment, 0) // commitments of all D ∈ L'
 	i_Lꞌ := make([]int, 0)                       // indices     of all D ∈ L'
@@ -476,7 +497,7 @@ func (dkg *dkg) NewResult(Lꞌ []VerifiedInnerDealing) (Result, error) {
 		return nil, fmt.Errorf("no valid inner dealings provided")
 	}
 
-	interpolate, err := math.NewInterpolator(dkg.curve, i_Lꞌ)
+	interpolate, err := math.NewInterpolator(curve, i_Lꞌ)
 	if err != nil {
 		return nil, err
 	}
@@ -487,22 +508,22 @@ func (dkg *dkg) NewResult(Lꞌ []VerifiedInnerDealing) (Result, error) {
 			Cₖ[D] = C_D[k]
 		}
 
-		if dkg.priorResult == nil {
-			// In the non-resharing case, compute [C] <-- Π_{D ∈ [L']} [C]_D.
-			C[k] = Cₖ.Sum()
-		} else {
+		if resharing {
 			// In the resharing case, compute [C] via Lagrange interpolation.
 			var err error
 			if C[k], err = interpolate.PointAtZero(Cₖ); err != nil {
 				return nil, fmt.Errorf("failed to interpolate commitment: %w", err)
 			}
+		} else {
+			// In the non-resharing case, compute [C] <-- Π_{D ∈ [L']} [C]_D.
+			C[k] = Cₖ.Sum()
 		}
 	}
 
-	y := C[0]                               // y   <-- [C]^(0)
-	y_R := C.EvalRange(len(dkg.recipients)) // y_R <-- [C]^(R) for all R ∈ R
+	y := C[0]               // y   <-- [C]^(0)
+	y_R := C.EvalRange(n_R) // y_R <-- [C]^(R) for all R ∈ R
 
-	return &result{dkg.iid, dkg.curve, t_R, Lꞌ, y, y_R, dkg.priorResult != nil}, nil
+	return &result{iid, curve, t_R, Lꞌ, y, y_R, resharing, attempt}, nil
 }
 
 // Encrypt the inner dealing package ID_D using the encryption key z_D.
@@ -539,7 +560,7 @@ func (dkg *dkg) decryptAndVerifyInnerDealing(Dꞌ int, EID_Dꞌ []byte, z_Dꞌ m
 		return nil, fmt.Errorf("failed to unmarshal inner dealing package: %w", err)
 	}
 
-	ad := hAd(dkg.iid, "inner", Dꞌ)
+	ad := hAd(dkg.iid, "inner", Dꞌ, dkg.attempt)
 	ID_Dꞌ_verified, err := dkg.vessInner.VerifyDealing(ID_Dꞌ, ad)
 	if err != nil {
 		return nil, err
@@ -580,11 +601,12 @@ func (dkg *dkg) checkVerifiedInitialDealings(L []VerifiedInitialDealing) error {
 
 // Setup associated data for the use with VESS.
 // Specifically, ad := (iid, tag, D), where tag ∈ { "inner", "outer" }.
-func hAd(iid dkgtypes.InstanceID, tag string, D int) []byte {
+func hAd(iid dkgtypes.InstanceID, tag string, D int, attempt int) []byte {
 	h := xof.New("chain.link/san-marino-dkg/v1/hAd")
 	h.WriteString(string(iid))
 	h.WriteString(tag)
 	h.WriteInt(D)
+	h.WriteInt(attempt)
 	return h.Digest()
 }
 

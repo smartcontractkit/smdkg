@@ -5,32 +5,42 @@ import (
 	"encoding/binary"
 	"time"
 
-	"github.com/smartcontractkit/libocr/offchainreporting2plus/ocr3confighelper"
+	"github.com/smartcontractkit/libocr/offchainreporting2plus/ocr3_1confighelper"
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/types"
 )
 
 var configDigest types.ConfigDigest = types.ConfigDigest{0x13, 0x37}
 
+func pointerToValue[T any](value T) *T {
+	return &value
+}
+
 func MakeContractConfig(F, N int, reportingPluginConfig []byte) types.ContractConfig {
-	signers, transmitters, f, onchainConfig, offchainConfigVersion, offchainConfig, err := ocr3confighelper.ContractSetConfigArgsForTests(
-		10*time.Second,
-		10*time.Second,
-		200*time.Millisecond,
-		time.Millisecond,
-		0,
-		time.Second,
-		time.Second,
-		10,
-		[]int{N},
+	signers, transmitters, f, onchainConfig, offchainConfigVersion, offchainConfig, err := ocr3_1confighelper.ContractSetConfigArgsForTests(
+		ocr3_1confighelper.CheckPublicConfigLevelDefault,
 		OracleIdentities(N),
+		F,
+
+		10*time.Second,
+		10*time.Millisecond,
+		0,
+		10,
+		time.Second,
+		[]int{N},
 		reportingPluginConfig,
 		nil,
 		time.Second,
+		10*time.Second,
+		10*time.Second,
+		10*time.Second,
+		10*time.Second,
+		10*time.Second,
+		10*time.Second,
 		time.Second,
 		time.Second,
-		time.Second,
-		F,
-		nil,
+		ocr3_1confighelper.ContractSetConfigArgsOptionalConfig{
+			SnapshotInterval: pointerToValue(uint64(100_000)),
+		},
 	)
 	if err != nil {
 		panic(err)

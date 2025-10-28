@@ -85,14 +85,14 @@ func (c *p224Curve) Point() Point         { return &P224Point{*nistec.NewP224Poi
 func (c *p256Curve) Point() Point         { return &P256Point{*nistec.NewP256Point()} }
 func (c *p384Curve) Point() Point         { return &P384Point{*nistec.NewP384Point()} }
 func (c *p521Curve) Point() Point         { return &P521Point{*nistec.NewP521Point()} }
-func (c *edwards25519Curve) Point() Point { return &Edward25519Point{} }
+func (c *edwards25519Curve) Point() Point { return &Edwards25519Point{} }
 
 func (c *p224Curve) Generator() Point { return &P224Point{*nistec.NewP224Point().SetGenerator()} }
 func (c *p256Curve) Generator() Point { return &P256Point{*nistec.NewP256Point().SetGenerator()} }
 func (c *p384Curve) Generator() Point { return &P384Point{*nistec.NewP384Point().SetGenerator()} }
 func (c *p521Curve) Generator() Point { return &P521Point{*nistec.NewP521Point().SetGenerator()} }
 func (c *edwards25519Curve) Generator() Point {
-	return &Edward25519Point{*edwards25519.NewGeneratorPoint()}
+	return &Edwards25519Point{*edwards25519.NewGeneratorPoint()}
 }
 
 func (c *p224Curve) ScalarBytes() int         { return 28 }

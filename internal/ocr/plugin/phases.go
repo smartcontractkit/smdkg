@@ -102,7 +102,7 @@ func (u pluginPhaseUnmarshaler) UnmarshalFrom(source codec.Source) plugintypes.P
 // otherwise reuse the existing one.
 func (p *phaseDealing) Observation(
 	ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery,
-	kvReader ocr3_1types.KeyValueReader, blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher,
+	kvReader ocr3_1types.KeyValueStateReader, blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher,
 ) (ocrtypes.Observation, error) {
 	blobHandle, err := p.state.MemoizedOutboundInitialDealingBlobHandle(ctx, seqNr, p.attempt, blobBroadcastFetcher, p.rand)
 	if err != nil {
@@ -119,7 +119,7 @@ func (p *phaseDealing) Observation(
 // Validate the initial dealing from an unbanned dealer, and cache the verified initial dealing for state transition.
 func (p *phaseDealing) ValidateObservation(
 	ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery,
-	ao ocrtypes.AttributedObservation, kvReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher,
+	ao ocrtypes.AttributedObservation, kvReader ocr3_1types.KeyValueStateReader, blobFetcher ocr3_1types.BlobFetcher,
 ) error {
 	bannedDealers, err := p.state.ReadBannedDealers(kvReader)
 	if err != nil {
@@ -153,9 +153,9 @@ func (p *phaseDealing) ValidateObservation(
 // Require at least dkg.DealingsThreshold() valid initial dealings to move to the next state.
 func (p *phaseDealing) ObservationQuorum(
 	ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery,
-	aos []ocrtypes.AttributedObservation, kvReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher,
+	aos []ocrtypes.AttributedObservation, kvReader ocr3_1types.KeyValueStateReader, blobFetcher ocr3_1types.BlobFetcher,
 ) (bool, error) {
-	cryptoProvider, err := p.state.MemoizedCryptoProvider(ctx)
+	cryptoProvider, err := p.state.MemoizedCryptoProvider(ctx, p.attempt)
 	if err != nil {
 		return false, err
 	}
@@ -166,9 +166,9 @@ func (p *phaseDealing) ObservationQuorum(
 // decrypting.
 func (p *phaseDealing) StateTransition(
 	ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery, aos []ocrtypes.AttributedObservation,
-	kvWriter ocr3_1types.KeyValueReadWriter, blobFetcher ocr3_1types.BlobFetcher,
+	kvWriter ocr3_1types.KeyValueStateReadWriter, blobFetcher ocr3_1types.BlobFetcher,
 ) (ocr3_1types.ReportsPlusPrecursor, error) {
-	cryptoProvider, err := p.state.MemoizedCryptoProvider(ctx)
+	cryptoProvider, err := p.state.MemoizedCryptoProvider(ctx, p.attempt)
 	if err != nil {
 		return nil, err
 	}
@@ -219,9 +219,9 @@ func (p *phaseDealing) StateTransition(
 
 // Generate decryption key shares for the committed initial dealings, and disseminate them as observations.
 func (p *phaseDecrypting) Observation(ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery,
-	kvReader ocr3_1types.KeyValueReader, blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher,
+	kvReader ocr3_1types.KeyValueStateReader, blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher,
 ) (ocrtypes.Observation, error) {
-	cryptoProvider, err := p.state.MemoizedCryptoProvider(ctx)
+	cryptoProvider, err := p.state.MemoizedCryptoProvider(ctx, p.attempt)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +248,7 @@ func (p *phaseDecrypting) Observation(ctx context.Context, seqNr uint64, aq ocrt
 
 // Validate the decryption key shares from a dealer, and cache the verified version for state transition.
 func (p *phaseDecrypting) ValidateObservation(ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery,
-	ao ocrtypes.AttributedObservation, kvReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher,
+	ao ocrtypes.AttributedObservation, kvReader ocr3_1types.KeyValueStateReader, blobFetcher ocr3_1types.BlobFetcher,
 ) error {
 	initialDealings, err := p.state.ReadInitialDealings(kvReader, p.attempt)
 	if err != nil {
@@ -264,9 +264,9 @@ func (p *phaseDecrypting) ValidateObservation(ctx context.Context, seqNr uint64,
 // state.
 func (p *phaseDecrypting) ObservationQuorum(
 	ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery, aos []ocrtypes.AttributedObservation,
-	kvReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher,
+	kvReader ocr3_1types.KeyValueStateReader, blobFetcher ocr3_1types.BlobFetcher,
 ) (bool, error) {
-	cryptoProvider, err := p.state.MemoizedCryptoProvider(ctx)
+	cryptoProvider, err := p.state.MemoizedCryptoProvider(ctx, p.attempt)
 	if err != nil {
 		return false, err
 	}
@@ -276,9 +276,9 @@ func (p *phaseDecrypting) ObservationQuorum(
 // Recovers the inner dealings by the valid decryption key shares, writes them to kv store, and move to the next state.
 func (p *phaseDecrypting) StateTransition(
 	ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery, aos []ocrtypes.AttributedObservation,
-	kvWriter ocr3_1types.KeyValueReadWriter, blobFetcher ocr3_1types.BlobFetcher,
+	kvWriter ocr3_1types.KeyValueStateReadWriter, blobFetcher ocr3_1types.BlobFetcher,
 ) (ocr3_1types.ReportsPlusPrecursor, error) {
-	cryptoProvider, err := p.state.MemoizedCryptoProvider(ctx)
+	cryptoProvider, err := p.state.MemoizedCryptoProvider(ctx, p.attempt)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +358,7 @@ func (p *phaseDecrypting) StateTransition(
 	}
 
 	// All good, the inner dealings are recovered successfully. Let's finish the DKG.
-	reportsPlusPrecursor, err := p.state.MemoizedReportsPlusPrecursor(ctx, innerDealings, p.pluginConfig)
+	reportsPlusPrecursor, err := p.state.MemoizedReportsPlusPrecursor(ctx, p.attempt, innerDealings, p.pluginConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DKG result package: %w", err)
 	}
@@ -382,7 +382,7 @@ func (p *phaseDecrypting) StateTransition(
 
 // Nothing needed to be sent via observation after DKG result is committed.
 func (p *phaseFinished) Observation(
-	ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery, kvReader ocr3_1types.KeyValueReader,
+	ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery, kvReader ocr3_1types.KeyValueStateReader,
 	blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher,
 ) (ocrtypes.Observation, error) {
 	return nil, nil
@@ -391,7 +391,7 @@ func (p *phaseFinished) Observation(
 // Nothing needed to be validated after DKG result is committed.
 func (p *phaseFinished) ValidateObservation(
 	ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery, ao ocrtypes.AttributedObservation,
-	kvReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher,
+	kvReader ocr3_1types.KeyValueStateReader, blobFetcher ocr3_1types.BlobFetcher,
 ) error {
 	return nil
 }
@@ -399,7 +399,7 @@ func (p *phaseFinished) ValidateObservation(
 // Any amount of observations not exceeding n-f should be good enough to retransmit the DKG result.
 // Require a Byzantine quorum of observations just to avoid the OCR from proceeding too fast.
 func (p *phaseFinished) ObservationQuorum(ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery,
-	aos []ocrtypes.AttributedObservation, kvReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher,
+	aos []ocrtypes.AttributedObservation, kvReader ocr3_1types.KeyValueStateReader, blobFetcher ocr3_1types.BlobFetcher,
 ) (bool, error) {
 	return quorumhelper.ObservationCountReachesObservationQuorum(
 		quorumhelper.QuorumByzQuorum, len(p.dealers), p.f_D, aos,
@@ -408,7 +408,7 @@ func (p *phaseFinished) ObservationQuorum(ctx context.Context, seqNr uint64, aq 
 
 // Retransmit the cached result package every 5 OCR rounds (seqNr).
 func (p *phaseFinished) StateTransition(ctx context.Context, seqNr uint64, aq ocrtypes.AttributedQuery,
-	aos []ocrtypes.AttributedObservation, kvWriter ocr3_1types.KeyValueReadWriter,
+	aos []ocrtypes.AttributedObservation, kvWriter ocr3_1types.KeyValueStateReadWriter,
 	blobFetcher ocr3_1types.BlobFetcher,
 ) (ocr3_1types.ReportsPlusPrecursor, error) {
 	innerDealings, err := p.state.ReadInnerDealings(kvWriter, p.attempt)
@@ -417,7 +417,7 @@ func (p *phaseFinished) StateTransition(ctx context.Context, seqNr uint64, aq oc
 	}
 
 	if seqNr%transmitFrequency == 0 {
-		return p.state.MemoizedReportsPlusPrecursor(ctx, innerDealings, p.pluginConfig)
+		return p.state.MemoizedReportsPlusPrecursor(ctx, p.attempt, innerDealings, p.pluginConfig)
 	}
 	return nil, nil
 }

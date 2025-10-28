@@ -46,6 +46,11 @@ func Setup(n_D, n_R, t_R int, seed string) (
 		sha256.Sum256([]byte(seed)),
 	)
 
+	var nonce [32]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", dkgocrtypes.ReportingPluginConfig{}, nil, nil, nil, fmt.Errorf("failed to read nonce: %w", err)
+	}
+
 	// Initialize keyrings and public keys for all dealers.
 	dealers := make([]dkgocrtypes.P256ParticipantPublicKey, n_D)
 	dealerKeyrings := make([]dkgocrtypes.P256Keyring, n_D)
@@ -72,6 +77,7 @@ func Setup(n_D, n_R, t_R int, seed string) (
 		recipients, // public keys of the recipients
 		t_R,        // number of shares needed to reconstruct the master secret key
 		nil,        // no previous instance ID, fresh DKG run
+		nonce,      // random nonce
 	}
 
 	return iid, config, dealerKeyrings, recipientKeyrings, rand, nil

@@ -2,11 +2,9 @@ package db
 
 import (
 	"context"
-	"strconv"
 	"sync"
 	"time"
 
-	"github.com/smartcontractkit/libocr/offchainreporting2plus/ocr3_1types"
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/ocr3types"
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/types"
 )
@@ -146,10 +144,7 @@ type OCR3_1InMemoryDatabase struct {
 	*InMemoryDatabase
 }
 
-var (
-	_ ocr3types.ProtocolStateDatabase = (*OCR3_1InMemoryDatabase)(nil)
-	_ ocr3_1types.BlockDatabase       = (*OCR3_1InMemoryDatabase)(nil)
-)
+var _ ocr3types.ProtocolStateDatabase = (*OCR3_1InMemoryDatabase)(nil)
 
 func NewOCR3_1InMemoryDatabase(config types.ContractConfig) *OCR3_1InMemoryDatabase {
 	return &OCR3_1InMemoryDatabase{
@@ -161,27 +156,4 @@ func NewOCR3_1InMemoryDatabase(config types.ContractConfig) *OCR3_1InMemoryDatab
 			sync.Mutex{},
 		},
 	}
-}
-
-func (db *OCR3_1InMemoryDatabase) ReadBlock(ctx context.Context, configDigest types.ConfigDigest, seqNr uint64) ([]byte, error) {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-
-	if _, ok := db.protocolState[strconv.FormatUint(seqNr, 10)]; !ok {
-		return nil, nil
-	}
-	return db.protocolState[strconv.FormatUint(seqNr, 10)], nil
-}
-
-func (db *OCR3_1InMemoryDatabase) WriteBlock(ctx context.Context, configDigest types.ConfigDigest, seqNr uint64, block []byte) error {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-
-	if block == nil {
-		delete(db.protocolState, strconv.FormatUint(seqNr, 10))
-	} else {
-		db.protocolState[strconv.FormatUint(seqNr, 10)] = block
-	}
-
-	return nil
 }

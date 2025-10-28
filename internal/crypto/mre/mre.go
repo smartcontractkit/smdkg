@@ -55,7 +55,7 @@ func (c *ciphertext) IsNil() bool {
 //   - The function supports associated data with the field ad (but does not encrypt it).
 //   - The function gracefully handles invalid encryption keys (passed as nil values). Recipients with invalid keys are
 //     skipped, and the corresponding ciphertexts are set to nil.
-func Encrypt(ek []dkgtypes.P256PublicKey, m [][]byte, ad []byte, nonce [16]byte) ([]byte, error) {
+func Encrypt(k int, ek []dkgtypes.P256PublicKey, m [][]byte, ad []byte, nonce [16]byte) ([]byte, error) {
 	if len(ek) != len(m) {
 		return nil, fmt.Errorf("number of encryption keys (%d) must match number of messages (%d)", len(ek), len(m))
 	}
@@ -63,7 +63,7 @@ func Encrypt(ek []dkgtypes.P256PublicKey, m [][]byte, ad []byte, nonce [16]byte)
 
 	// The encryption is randomized using a 16-byte nonce, used to deterministically derive the random scalar r.
 	// Note that here r is implemented as a P256 key pair, giving easy access to the value of r and g ^ r.
-	r, err := h_R(nonce)
+	r, err := h_R(k, ad, nonce)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func Encrypt(ek []dkgtypes.P256PublicKey, m [][]byte, ad []byte, nonce [16]byte)
 		// Eᵢ := mᵢ xor H_enc(i, ek[i], E0, ekᵢʳ, ad)
 		// Note that this is essentially a one-time pad encryption with no protection against tampering of the
 		// ciphertext, it is intended to be that way.
-		Eᵢ, err := h_Enc(i, ek[i], Eₒ, ekᵢʳ, ad, len(m[i]))
+		Eᵢ, err := h_Enc(k, i, ek[i], Eₒ, ekᵢʳ, ad, len(m[i]))
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +118,7 @@ func Encrypt(ek []dkgtypes.P256PublicKey, m [][]byte, ad []byte, nonce [16]byte)
 // n ciphertexts, skipping empty ones. If parsing of E fails, an error is returned. Only if all ciphertexts are
 // successfully parsed (they may be nil though), the function proceeds to decrypt the i'th ciphertext and return it.
 // If an invalid decryption key or associated data ad is provided, the function returns a random "garbage" plaintext.
-func Decrypt(n int, i int, Dᵢ dkgtypes.P256Keyring, E Ciphertext, ad []byte) ([]byte, error) {
+func Decrypt(k int, n int, i int, Dᵢ dkgtypes.P256Keyring, E Ciphertext, ad []byte) ([]byte, error) {
 	if n <= 0 {
 		return nil, fmt.Errorf("invalid number of ciphertexts: %d, must be positive", n)
 	}
@@ -151,7 +151,7 @@ func Decrypt(n int, i int, Dᵢ dkgtypes.P256Keyring, E Ciphertext, ad []byte) (
 	}
 
 	// Compute mᵢ := H_enc(i, ekᵢ, Eₒ, Eₒ ^ dkᵢ, ad)
-	mᵢ, err := h_Enc(i, ekᵢ, Eₒ, Eₒᶺdkᵢ, ad, len(Eᵢ))
+	mᵢ, err := h_Enc(k, i, ekᵢ, Eₒ, Eₒᶺdkᵢ, ad, len(Eᵢ))
 	if err != nil {
 		return nil, err
 	}
@@ -170,8 +170,9 @@ func CiphertextSize(n int, totalPlaintextSize int) int {
 	return size
 }
 
-func h_Enc(i int, ekᵢ dkgtypes.P256PublicKey, Eₒ dkgtypes.P256PublicKey, ekᵢʳ []byte, ad []byte, digestLenBytes int) ([]byte, error) {
+func h_Enc(k int, i int, ekᵢ dkgtypes.P256PublicKey, Eₒ dkgtypes.P256PublicKey, ekᵢʳ []byte, ad []byte, digestLenBytes int) ([]byte, error) {
 	h := xof.New("chain.link/san-marino-dkg/v1/mre/hEnc")
+	h.WriteInt(k)
 	h.WriteInt(i)
 	h.WriteBytes(ekᵢ.Bytes())
 	h.WriteBytes(Eₒ.Bytes())
@@ -185,8 +186,10 @@ func h_Enc(i int, ekᵢ dkgtypes.P256PublicKey, Eₒ dkgtypes.P256PublicKey, ek�
 	return out, nil
 }
 
-func h_R(r [16]byte) (dkgtypes.P256KeyPair, error) {
+func h_R(k int, ad []byte, r [16]byte) (dkgtypes.P256KeyPair, error) {
 	h := xof.New("chain.link/san-marino-dkg/v1/mre/hR")
+	h.WriteInt(k)
+	h.WriteBytes(ad)
 	h.WriteBytes(r[:])
 	return dkgtypes.NewP256KeyPair(h)
 }

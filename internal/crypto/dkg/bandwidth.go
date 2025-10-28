@@ -127,7 +127,9 @@ func (p *bandwidthParams) estimateBandwidthForInnerDealings(t_D *int) int {
 }
 
 // Returns the estimated bandwidth consumption (in bytes) for a result package.
-// For fresh dealing, this is always a tight estimate, as the number of inner dealings only depends on F_D.
+// For fresh dealing, this is always a tight estimate if from an honest dealer, as the number of inner dealings only depends on F_D.
+// An adversarial dealer could include points at infinity that have a smaller encoding size than regular points,
+// so the dealing size could be slightly overestimated.
 // For resharing, this could be a loose estimate, as the number of inner dealings depends on T_D, which may be unknown at the time of estimation.
 func (p *bandwidthParams) estimateBandwidthForResult(t_D *int) int {
 	// Recall the member fields of a decryption key shares decryptionKeySharesForInnerDealings:
@@ -140,14 +142,15 @@ func (p *bandwidthParams) estimateBandwidthForResult(t_D *int) int {
 	// 	-	wasReshared bool
 
 	size := 0
-	size += len(p.iid)                               // iid
-	size += codec.IntSize                            // length prefix for iid
-	size += 1                                        // curve type
-	size += codec.IntSize                            // t_r
-	size += p.estimateBandwidthForInnerDealings(t_D) // L'
-	size += codec.IntSize                            // length of y_R
-	size += p.curve.PointBytes()                     // y
-	size += p.n_R * p.curve.PointBytes()             // y_R
-	size += 1                                        // wasReshared
+	size += len(p.iid)                                     // iid
+	size += codec.IntSize                                  // length prefix for iid
+	size += 1                                              // curve type
+	size += codec.IntSize                                  // t_r
+	size += p.estimateBandwidthForInnerDealings(t_D)       // L'
+	size += codec.IntSize                                  // length of y_R
+	size += p.curve.PointBytes() + codec.IntSize           // y, point encoding is length-prefixed
+	size += p.n_R * (p.curve.PointBytes() + codec.IntSize) // y_R, each point encoding is length-prefixed
+	size += 1                                              // wasReshared
+	size += 4                                              // attempt
 	return size
 }

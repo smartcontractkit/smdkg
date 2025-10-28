@@ -49,10 +49,25 @@ func SimulateResharingDKGForTest(
 	keyrings []dkgtypes.P256Keyring, // keyrings for all dealers
 	prior Result,
 ) (Result, error) {
+	return SimulateResharingDKGInOneAttemptForTest(iid, dealers, recipients, f_D, t_R, keyrings, prior, 0)
+}
+
+// SimulateResharingDKGInOneAttemptForTest simulates the execution of the re-sharing DKG protocol for one attempt and returns
+// the resulting shared key. The simulation is deterministic for a given InstanceID.
+func SimulateResharingDKGInOneAttemptForTest(
+	iid dkgtypes.InstanceID,
+	dealers []dkgtypes.P256PublicKey, // must match the prior result's recipients
+	recipients []dkgtypes.P256PublicKey,
+	f_D int,
+	t_R int,
+	keyrings []dkgtypes.P256Keyring, // keyrings for all dealers
+	prior Result,
+	attempt int,
+) (Result, error) {
 	dkgs := make([]DKG, len(dealers))
 	for i, keyring := range keyrings {
 		var err error
-		dkgs[i], err = NewResharingDKG(iid, dealers, recipients, f_D, t_R, keyring, prior)
+		dkgs[i], err = NewResharingDKG(iid, dealers, recipients, f_D, t_R, keyring, prior, attempt)
 		if err != nil {
 			return nil, err
 		}

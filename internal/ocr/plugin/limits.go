@@ -43,13 +43,16 @@ func (e *limitsEstimator) LoosenedLimitsByPercentage(percentage int) ocr3_1types
 	factor := 1 + float64(percentage)/100.0
 
 	return ocr3_1types.ReportingPluginLimits{
-		e.limits.MaxQueryLength, // keep this unchanged
-		int(float64(e.limits.MaxObservationLength) * factor),
-		int(float64(e.limits.MaxReportsPlusPrecursorLength) * factor),
-		int(float64(e.limits.MaxReportLength) * factor),
-		e.limits.MaxReportCount, // keep this unchanged
-		int(float64(e.limits.MaxKeyValueModifiedKeysPlusValuesLength) * factor),
-		int(float64(e.limits.MaxBlobPayloadLength) * factor),
+		e.limits.MaxQueryBytes, // keep this unchanged
+		int(float64(e.limits.MaxObservationBytes) * factor),
+		int(float64(e.limits.MaxReportsPlusPrecursorBytes) * factor),
+		int(float64(e.limits.MaxReportBytes) * factor),
+		e.limits.MaxReportCount,          // keep this unchanged
+		e.limits.MaxKeyValueModifiedKeys, // keep this unchanged
+		int(float64(e.limits.MaxKeyValueModifiedKeysPlusValuesBytes) * factor),
+		int(float64(e.limits.MaxBlobPayloadBytes) * factor),
+		int(float64(e.limits.MaxPerOracleUnexpiredBlobCumulativePayloadBytes) * factor),
+		e.limits.MaxPerOracleUnexpiredBlobCount, // keep this unchanged
 	}
 }
 
@@ -57,12 +60,16 @@ func (e *limitsEstimator) LoosenedLimitsByPercentage(percentage int) ocr3_1types
 func reportingPluginLimits(estimator *dkg.BandwidthEstimator, pluginConfigLength int) ocr3_1types.ReportingPluginLimits {
 	return ocr3_1types.ReportingPluginLimits{
 		0, // MaxQueryLength: Not sending any thing via Query
-		estimateObservationLength(estimator),
-		estimateReportsPlusPrecursorLength(estimator, pluginConfigLength),
-		estimateReportLength(estimator, pluginConfigLength),
-		1, // MaxReportCount: Only one report, the dkg result package, is transmitted in each round
-		estimateKeyValueModifiedKeysPlusValuesLength(estimator),
-		estimateBlobPayloadLength(estimator),
+		estimateObservationBytes(estimator),
+		estimateReportsPlusPrecursorBytes(estimator, pluginConfigLength),
+		estimateReportBytes(estimator, pluginConfigLength),
+		1,     // MaxReportCount: Only one report, the dkg result package, is transmitted in each round
+		5 * 2, // MaxKeyValueModifiedKeys: There are only 5 different keys/objects we write ever, see kv.go. We multiply by 2 to be on the safe side.
+		estimateKeyValueModifiedKeysPlusValuesBytes(estimator),
+		estimateBlobPayloadBytes(estimator),
+		// MaxPerOracleUnexpiredBlobCumulativePayloadBytes & MaxPerOracleUnexpiredBlobCount: We only keep one blob per other oracle at a given time.
+		estimateBlobPayloadBytes(estimator),
+		1,
 	}
 }
 
@@ -81,13 +88,13 @@ func estimateBlobHandleLength(estimator *dkg.BandwidthEstimator) int {
 	return (chunkDigests + signatures + 256) * 3
 }
 
-// MaxObservationLength: max(blob handle, decryption key shares)
-func estimateObservationLength(estimator *dkg.BandwidthEstimator) int {
+// MaxObservationBytes: max(blob handle, decryption key shares)
+func estimateObservationBytes(estimator *dkg.BandwidthEstimator) int {
 	return max(estimateBlobHandleLength(estimator), estimator.EstimatedBandwidthForDecryptionKeyShares)
 }
 
-// MaxReportsPlusPrecursorLength: length of ResultPackage
-func estimateReportsPlusPrecursorLength(estimator *dkg.BandwidthEstimator, pluginConfigLength int) int {
+// MaxReportsPlusPrecursorBytes: length of ResultPackage
+func estimateReportsPlusPrecursorBytes(estimator *dkg.BandwidthEstimator, pluginConfigLength int) int {
 	size := 0
 	size += estimator.EstimatedBandwidthForResult // Result
 	size += codec.IntSize                         // Length prefix for config
@@ -95,14 +102,14 @@ func estimateReportsPlusPrecursorLength(estimator *dkg.BandwidthEstimator, plugi
 	return size
 }
 
-// MaxReportLength: length of ResultPackage
-func estimateReportLength(estimator *dkg.BandwidthEstimator, pluginConfigLength int) int {
-	return estimateReportsPlusPrecursorLength(estimator, pluginConfigLength)
+// MaxReportBytes: length of ResultPackage
+func estimateReportBytes(estimator *dkg.BandwidthEstimator, pluginConfigLength int) int {
+	return estimateReportsPlusPrecursorBytes(estimator, pluginConfigLength)
 }
 
-// MaxKeyValueModifiedKeysPlusValuesLength: the max size of modification to the kv store in a single transaction
+// MaxKeyValueModifiedKeysPlusValuesBytes: the max size of modification to the kv store in a single transaction
 // For estimating the upper bound, we assume all entries are written in a single transaction
-func estimateKeyValueModifiedKeysPlusValuesLength(estimator *dkg.BandwidthEstimator) int {
+func estimateKeyValueModifiedKeysPlusValuesBytes(estimator *dkg.BandwidthEstimator) int {
 	// in each instance of dkg, these are written to the kv store:
 	// 	- 	pluginState
 	// 	- 	bannedDealers
@@ -145,7 +152,7 @@ func estimateKeyValueModifiedKeysPlusValuesLength(estimator *dkg.BandwidthEstima
 	return size
 }
 
-// MaxBlobPayloadLength: length of an initial dealing
-func estimateBlobPayloadLength(estimator *dkg.BandwidthEstimator) int {
+// MaxBlobPayloadBytes: length of an initial dealing
+func estimateBlobPayloadBytes(estimator *dkg.BandwidthEstimator) int {
 	return estimator.EstimatedBandwidthForInitialDealing
 }

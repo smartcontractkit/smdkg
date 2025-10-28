@@ -22,23 +22,23 @@ type PluginPhase interface {
 	codec.Marshaler
 
 	Observation(
-		ctx context.Context, seqNr uint64, aq types.AttributedQuery, keyValueReader ocr3_1types.KeyValueReader,
+		ctx context.Context, seqNr uint64, aq types.AttributedQuery, keyValueReader ocr3_1types.KeyValueStateReader,
 		blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher,
 	) (types.Observation, error)
 
 	ValidateObservation(
 		ctx context.Context, seqNr uint64, aq types.AttributedQuery, ao types.AttributedObservation,
-		keyValueReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher,
+		keyValueReader ocr3_1types.KeyValueStateReader, blobFetcher ocr3_1types.BlobFetcher,
 	) error
 
 	ObservationQuorum(
 		ctx context.Context, seqNr uint64, aq types.AttributedQuery, aos []types.AttributedObservation,
-		keyValueReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher,
+		keyValueReader ocr3_1types.KeyValueStateReader, blobFetcher ocr3_1types.BlobFetcher,
 	) (bool, error)
 
 	StateTransition(
 		ctx context.Context, seqNr uint64, aq types.AttributedQuery, aos []types.AttributedObservation,
-		keyValueReadWriter ocr3_1types.KeyValueReadWriter, blobFetcher ocr3_1types.BlobFetcher,
+		keyValueReadWriter ocr3_1types.KeyValueStateReadWriter, blobFetcher ocr3_1types.BlobFetcher,
 	) (ocr3_1types.ReportsPlusPrecursor, error)
 }
 

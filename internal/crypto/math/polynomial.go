@@ -16,7 +16,7 @@ type ScalarShare struct {
 
 type ScalarShares []ScalarShare
 
-// Initialize a the coefficients for random polynomial ω(x) of degree t - 1, with its first coefficient being set to the
+// Initialize the coefficients for random polynomial ω(x) of degree t - 1, with its first coefficient being set to the
 // secret s. Note that a degree t - 1 polynomial has t coefficients (including s).
 func RandomPolynomial(s Scalar, t int, rand io.Reader) (Polynomial, error) {
 	if t <= 0 {
@@ -38,16 +38,23 @@ func RandomPolynomial(s Scalar, t int, rand io.Reader) (Polynomial, error) {
 // Evaluate a polynomial ω(x) of degree t - 1, with coefficients w[0], w[1], ..., w[t-1], at the point x = i + 1.
 // ω(x) = w[0] + w[1] * x + w[2] * x^2 + ... + w[t-1] * x^(t-1)
 func (w Polynomial) Eval(i int) Scalar {
-	x := w[0].Clone().SetUint(uint(i) + 1) // x = i + 1
-	sum := w[0].Clone()
-	xPowI := x.Clone() // holds x^i for i = 1, 2, ..., t-1
-	for i := 1; i < len(w); i++ {
-		t := w[i].Clone().Multiply(xPowI) // t = w[i] * x^i
-		sum.Add(t)                        // sum += t
-		if i != len(w)-1 {
-			xPowI.Multiply(x) // x^(i+1) = x^i * x
-		}
+	if i < 0 {
+		panic("polynomial evaluation index must be non-negative")
 	}
+
+	// The point at which the polynomial is evaluated.
+	x := w[0].Clone().SetUint(uint(i) + 1) // x = i + 1
+
+	// Initialize the result with the coefficient of the highest degree term.
+	sum := w[len(w)-1].Clone()
+
+	// Iterate downwards from the second highest-degree coefficient.
+	// This corresponds to the nested structure of Horner's method.
+	for j := len(w) - 2; j >= 0; j-- {
+		sum.Multiply(x) // sum = sum * x
+		sum.Add(w[j])   // sum = sum + w[j]
+	}
+
 	return sum
 }
 
@@ -66,17 +73,19 @@ func (C PolynomialCommitment) Eval(i int) Point {
 		panic("polynomial commitment evaluation index must be non-negative")
 	}
 
-	sum := C[0].Clone()
+	// x is the scalar at which we evaluate the commitment.
 	x := C[0].Curve().Scalar().SetUint(uint(i) + 1) // x = i + 1
-	xⁱ := x.Clone()                                 // holds xⁱ for i = 1, 2, ..., t-1
 
-	for i := 1; i < len(C); i++ {
-		t := C[i].Clone().ScalarMult(xⁱ, C[i]) // t = Cᵢ * xⁱ
-		sum.Add(sum, t)                        // sum += t
-		if i != len(C)-1 {
-			xⁱ.Multiply(x) // x^(i+1) = x^i * x
-		}
+	// Initialize the result with the highest-index point in the commitment, C[n-1].
+	sum := C[len(C)-1].Clone()
+
+	// Iterate downwards from the second highest-degree coefficient of the commitment.
+	// This corresponds to the nested structure of Horner's method.
+	for j := len(C) - 2; j >= 0; j-- {
+		sum.ScalarMult(x, sum)
+		sum.Add(sum, C[j])
 	}
+
 	return sum
 }
 

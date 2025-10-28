@@ -29,7 +29,7 @@ func NewDKGs(
 	} else {
 		for i := range dealers {
 			var err error
-			dkgs[i], err = dkg.NewResharingDKG(iid, dealers, recipients, f_D, t_R, keyrings[i], priorResult)
+			dkgs[i], err = dkg.NewResharingDKG(iid, dealers, recipients, f_D, t_R, keyrings[i], priorResult, 0)
 			require.NoError(t, err)
 		}
 	}
@@ -63,9 +63,17 @@ func NewDKGResults(
 	result, err := dkgs[0].NewResult(innerDealings)
 	require.NoError(t, err, "Failed to create result from inner dealings")
 
+	var nonce [32]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		t.Fatalf("failed to read nonce: %v", err)
+	}
+
 	pluginConfig := dkgocrtypes.ReportingPluginConfig{
 		keyringHelpers.P256KeysToParticipantPublicKeys(dealers),
-		keyringHelpers.P256KeysToParticipantPublicKeys(recipients), t_R, nil,
+		keyringHelpers.P256KeysToParticipantPublicKeys(recipients),
+		t_R,
+		nil,
+		nonce,
 	}
 	resultPackage := plugintypes.ResultPackage{result, &pluginConfig}
 

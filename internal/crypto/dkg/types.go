@@ -1,6 +1,7 @@
 package dkg
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/smartcontractkit/smdkg/internal/codec"
@@ -10,7 +11,7 @@ import (
 )
 
 // High level data types returned by the DKG instance methods.
-// For the implementations of marshaling and unmarshaling, see marshal.go.
+// For the implementations of marshaling and unmarshaling, see serialization.go.
 
 // Represents result of the DKG protocol execution.
 type Result interface {
@@ -31,6 +32,12 @@ type Result interface {
 
 	// Function to retrieve the master secret key share with the given index (requires decryption).
 	MasterSecretKeyShare(index int, keyring dkgtypes.P256Keyring) (math.Scalar, error)
+
+	// Check that the result is a valid result of DKG protocol execution with the given parameters.
+	Verify(
+		iid dkgtypes.InstanceID, curve math.Curve, t_R int, recipients []dkgtypes.P256PublicKey,
+		resharing bool, masterPublicKey math.Point,
+	) (contributingDealerIndices []int, err error)
 }
 
 // When sending/receiving an initial dealing over the network, an UnverifiedInitialDealing is used. A valid
@@ -97,6 +104,7 @@ type result struct {
 	y           math.Point   // master public key
 	y_R         []math.Point // master public key shares
 	wasReshared bool         // if true, this result was obtained from a re-sharing, otherwise from a fresh dealing
+	attempt     int
 }
 
 type encryptedInnerDealing = []byte
@@ -185,7 +193,7 @@ func (r *result) MasterSecretKeyShare(R int, dk_R dkgtypes.P256Keyring) (math.Sc
 			continue
 		}
 
-		ad := hAd(r.iid, "inner", D)
+		ad := hAd(r.iid, "inner", D, r.attempt)
 		share, err := vess.Decrypt(R, dk_R, L_D.internal().base, ad)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decrypt inner share from inner dealing: %w", err)
@@ -211,6 +219,130 @@ func (r *result) MasterSecretKeyShare(R int, dk_R dkgtypes.P256Keyring) (math.Sc
 		}
 	}
 	return S_R, nil
+}
+
+func (r *result) Verify(
+	iid dkgtypes.InstanceID, curve math.Curve, t_R int, recipients []dkgtypes.P256PublicKey,
+	resharing bool, masterPublicKey math.Point,
+) ([]int, error) {
+	if r.iid != iid {
+		return nil, fmt.Errorf("internal instance ID (%s) does not match given instance ID (%s)", r.iid, iid)
+	}
+	if r.curve.Name() != curve.Name() {
+		return nil, fmt.Errorf("internal curve (%s) does not match given curve (%s)", r.curve.Name(), curve.Name())
+	}
+	if r.t_R != t_R {
+		return nil, fmt.Errorf("internal threshold (%d) does not match given threshold (%d)", r.t_R, t_R)
+	}
+	if len(r.y_R) != len(recipients) {
+		return nil, fmt.Errorf("number of internal public keys (%d) shares does not match number of recipients (%d)", len(r.y_R), len(recipients))
+	}
+	if r.wasReshared != resharing {
+		return nil, fmt.Errorf("internal resharing flag (%t) does not match given resharing flag (%t)", r.wasReshared, resharing)
+	}
+	if resharing && masterPublicKey == nil {
+		return nil, fmt.Errorf("verification of a reshared DKG result requires a non-nil master public key to compare against")
+	}
+
+	if len(r.Lꞌ) == 0 {
+		return nil, fmt.Errorf("no inner dealings present")
+	}
+	if len(r.y_R) == 0 {
+		return nil, fmt.Errorf("no master public key shares present")
+	}
+
+	if !resharing && r.attempt != 0 {
+		return nil, fmt.Errorf("attempt number must be zero for a fresh dealing result")
+	}
+	if resharing && r.attempt < 0 {
+		return nil, fmt.Errorf("attempt number must be non-negative for a reshared dealing result")
+	}
+
+	if r.y == nil {
+		return nil, fmt.Errorf("master public key is nil")
+	}
+	for _, yᵢ := range r.y_R {
+		if yᵢ == nil {
+			return nil, fmt.Errorf("master public key shares contain nil entry")
+		}
+	}
+
+	vessInner, err := vess.NewVESS(curve, iid, "inner", len(recipients), t_R, recipients)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create VESS instance for verifying inner dealings: %w", err)
+	}
+
+	contributingDealerIndices := make([]int, 0)
+
+	for Dꞌ, Lꞌ_D := range r.Lꞌ {
+		if Lꞌ_D == nil {
+			continue
+		}
+		contributingDealerIndices = append(contributingDealerIndices, Dꞌ)
+
+		ad := hAd(iid, "inner", Dꞌ, r.attempt)
+		dealing := Lꞌ_D.internal().base.UnverifiedDealing
+
+		_, err := vessInner.VerifyDealing(&dealing, ad)
+		if err != nil {
+			return nil, fmt.Errorf("failed to verify inner dealing from dealer %d: %w", Dꞌ, err)
+		}
+
+		// For resharing, there is a step to compare a dealer's decrypted inner dealing's commitment
+		// (evaluated at 0) with its master public key share from the prior result. This is check is omitted here, but
+		// below, we check if the interpolation of the master key shares indeed matches in the expected master public
+		// key.
+	}
+
+	if len(contributingDealerIndices) == 0 {
+		return nil, fmt.Errorf("no contributing dealers present")
+	}
+
+	if resharing {
+		if !r.y.Equal(masterPublicKey) {
+			return nil, fmt.Errorf(
+				"master public key does not match (internal %x, given %x)", r.y.Bytes(), masterPublicKey.Bytes(),
+			)
+		}
+	}
+
+	// Check that interpolating the master public key shares at 0 yields the master public key.
+	recipientIndices := make([]int, len(recipients))
+	for i := range recipients {
+		recipientIndices[i] = i
+	}
+	interpolate, err := math.NewInterpolator(curve, recipientIndices)
+	if err != nil {
+		return nil, err
+	}
+	yRecomputed, err := interpolate.PointAtZero(r.y_R)
+	if err != nil {
+		return nil, fmt.Errorf("failed to interpolate master public key: %w", err)
+	}
+	if !yRecomputed.Equal(r.y) {
+		return nil, fmt.Errorf(
+			"master public key does not match recomputed master public key from shares (recomputed %x, given %x)",
+			yRecomputed.Bytes(), r.y.Bytes(),
+		)
+	}
+
+	rRecomputed, err := newResult(iid, curve, len(recipients), t_R, resharing, r.Lꞌ, r.attempt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to recompute internal result structure: %w", err)
+	}
+	rBytes, err := codec.Marshal(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal original internal result: %w", err)
+	}
+	rRecomputedBytes, err := codec.Marshal(rRecomputed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal recomputed internal result: %w", err)
+	}
+	if !bytes.Equal(rBytes, rRecomputedBytes) {
+		return nil, fmt.Errorf("internal result does not match recomputed result")
+	}
+
+	return contributingDealerIndices, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

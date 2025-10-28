@@ -12,6 +12,9 @@ type Point interface {
 	// The returned Point is not initialized, and must be set using SetBytes(...) or Set(...) or used as receiver only.
 	New() Point
 
+	// v.Identity() returns a new independent Point instance representing the identity point of the curve.
+	Identity() Point
+
 	// v.Clone() returns a copy of v.
 	Clone() Point
 

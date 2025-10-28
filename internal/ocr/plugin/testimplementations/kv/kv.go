@@ -47,7 +47,7 @@ func (d *InMemoryKeyValueDatabase) Close() error {
 	return nil
 }
 
-func (d *InMemoryKeyValueDatabase) NewReadTransaction() (ocr3_1types.KeyValueReadTransaction, error) {
+func (d *InMemoryKeyValueDatabase) NewReadTransaction() (ocr3_1types.KeyValueDatabaseReadTransaction, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
@@ -62,7 +62,7 @@ func (d *InMemoryKeyValueDatabase) NewReadTransaction() (ocr3_1types.KeyValueRea
 	}, nil
 }
 
-func (d *InMemoryKeyValueDatabase) NewReadWriteTransaction() (ocr3_1types.KeyValueReadWriteTransaction, error) {
+func (d *InMemoryKeyValueDatabase) NewReadWriteTransaction() (ocr3_1types.KeyValueDatabaseReadWriteTransaction, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
@@ -100,7 +100,7 @@ type inMemoryReadWriteTransaction struct {
 	txStore map[string][]byte
 }
 
-func (d *inMemoryReadWriteTransaction) Range(loKey []byte, hiKeyExcl []byte) ocr3_1types.KeyValueIterator {
+func (d *inMemoryReadWriteTransaction) Range(loKey []byte, hiKeyExcl []byte) ocr3_1types.KeyValueDatabaseIterator {
 	loKey = bytes.Clone(loKey)
 	hiKeyExcl = bytes.Clone(hiKeyExcl)
 
@@ -142,7 +142,7 @@ type inMemoryRangeIterator struct {
 	currentKey []byte
 }
 
-var _ ocr3_1types.KeyValueIterator = &inMemoryRangeIterator{}
+var _ ocr3_1types.KeyValueDatabaseIterator = &inMemoryRangeIterator{}
 
 func (i *inMemoryRangeIterator) Close() error {
 	i.closed = true
@@ -179,8 +179,8 @@ func (i *inMemoryRangeIterator) Err() error {
 	return i.err
 }
 
-var _ ocr3_1types.KeyValueReadWriteTransaction = &inMemoryReadWriteTransaction{}
-var _ ocr3_1types.KeyValueReadTransaction = &inMemoryReadWriteTransaction{}
+var _ ocr3_1types.KeyValueDatabaseReadWriteTransaction = &inMemoryReadWriteTransaction{}
+var _ ocr3_1types.KeyValueDatabaseReadTransaction = &inMemoryReadWriteTransaction{}
 
 var errDiscarded = fmt.Errorf("transaction discarded")
 

@@ -62,6 +62,12 @@ type ReportingPluginConfig struct {
 	// If this is nil, the DKG will generate a new master secret.
 	// Otherwise, the DKG will reshare the master secret from the previous DKG run with the given instanceID.
 	PreviousInstanceID *InstanceID
+
+	// This value should be chosen uniformly at random, e.g. by reading from crypto/rand.
+	// Its purpose is to act as a defense-in-depth measure against an adversary grinding
+	// parameters (*before the DKG instance is actually run*) to break the statistical soundness
+	// of some of the non-interactive zk proofs performed inside the DKG protocol.
+	RandomValue [32]byte
 }
 
 type ResultPackage interface {
@@ -76,6 +82,10 @@ type ResultPackage interface {
 }
 
 // A result package with additional metadata to be stored in a database.
+
+var _ encoding.BinaryMarshaler = ResultPackageDatabaseValue{}
+var _ encoding.BinaryUnmarshaler = &ResultPackageDatabaseValue{}
+
 type ResultPackageDatabaseValue struct {
 	ConfigDigest            types.ConfigDigest
 	SeqNr                   uint64
@@ -131,5 +141,28 @@ func (c *ReportingPluginConfig) UnmarshalBinary(data []byte) error {
 		return fmt.Errorf("invalid versioned reporting plugin config: V1 is nil")
 	}
 	*c = *versionedConfig.V1
+	return nil
+}
+
+// This struct exists to make it easier to add a V2 in the future.
+type versionedResultPackageDatabaseValue struct {
+	V1 *ResultPackageDatabaseValue
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler using JSON as the underlying representation.
+func (r ResultPackageDatabaseValue) MarshalBinary() ([]byte, error) {
+	return json.Marshal(versionedResultPackageDatabaseValue{V1: &r})
+}
+
+// UnmarshalBinary implements encoding.BinaryUnmarshaler using JSON as the underlying representation.
+func (r *ResultPackageDatabaseValue) UnmarshalBinary(data []byte) error {
+	var versionedValue versionedResultPackageDatabaseValue
+	if err := json.Unmarshal(data, &versionedValue); err != nil {
+		return err
+	}
+	if versionedValue.V1 == nil {
+		return fmt.Errorf("invalid versioned ResultPackageDatabaseValue: V1 is nil")
+	}
+	*r = *versionedValue.V1
 	return nil
 }

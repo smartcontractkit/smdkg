@@ -43,6 +43,7 @@ func (r *result) MarshalTo(target codec.Target) {
 	}
 
 	target.WriteBool(r.wasReshared)
+	target.WriteInt(r.attempt)
 }
 
 func (r *result) UnmarshalFrom(source codec.Source) Result {
@@ -71,6 +72,7 @@ func (r *result) UnmarshalFrom(source codec.Source) Result {
 	}
 
 	r.wasReshared = source.ReadBool()
+	r.attempt = source.ReadInt()
 	return r
 }
 

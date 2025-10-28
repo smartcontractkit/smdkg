@@ -15,17 +15,17 @@ import (
 
 // Returns the crypto provider (DKG instance) if already set, otherwise tries to initialize it using the provided
 // initCryptoProviderFunc (referring to plugin.initCryptoProvider).
-func (s *PluginState) MemoizedCryptoProvider(ctx context.Context) (dkg.DKG, error) {
+func (s *PluginState) MemoizedCryptoProvider(ctx context.Context, attempt int) (dkg.DKG, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.cryptoProvider != nil {
+	if s.cryptoProvider != nil && attempt == s.cryptoProvider.Attempt() {
 		return s.cryptoProvider, nil
 	}
 
 	// Crypto provider was not yet set. Lets try to initialize it.
 	var err error
-	s.cryptoProvider, err = s.initCryptoProviderFunc(ctx)
+	s.cryptoProvider, err = s.initCryptoProviderFunc(ctx, attempt)
 	if err != nil {
 		return nil, fmt.Errorf("crypto provider not set, and not retrievable yet: %w", err)
 	}
@@ -48,7 +48,7 @@ func (s *PluginState) MemoizedOutboundInitialDealingBlobHandle(
 
 	// We haven't created and broadcasted an initial dealing for this attempt yet.
 	// Let's create a fresh initial dealing now.
-	cryptoProvider, err := s.MemoizedCryptoProvider(ctx)
+	cryptoProvider, err := s.MemoizedCryptoProvider(ctx, attempt)
 	if err != nil {
 		return ocr3_1types.BlobHandle{}, err
 	}
@@ -92,7 +92,7 @@ func (s *PluginState) MemoizedInboundVerifiedInitialDealing(
 		return entry.verified, nil
 	}
 
-	cryptoProvider, err := s.MemoizedCryptoProvider(ctx)
+	cryptoProvider, err := s.MemoizedCryptoProvider(ctx, attempt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get crypto provider: %w", err)
 	}
@@ -136,7 +136,7 @@ func (s *PluginState) MemoizedInboundVerifiedDecryptionKeyShares(
 		return nil, fmt.Errorf("failed to unmarshal decryption key shares: %w", err)
 	}
 
-	cryptoProvider, err := s.MemoizedCryptoProvider(ctx)
+	cryptoProvider, err := s.MemoizedCryptoProvider(ctx, attempt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get crypto provider: %w", err)
 	}
@@ -158,7 +158,8 @@ func (s *PluginState) MemoizedInboundVerifiedDecryptionKeyShares(
 }
 
 func (s *PluginState) MemoizedReportsPlusPrecursor(
-	ctx context.Context, innerDealings plugintypes.InnerDealings, config *dkgocrtypes.ReportingPluginConfig,
+	ctx context.Context, attempt int, innerDealings plugintypes.InnerDealings,
+	config *dkgocrtypes.ReportingPluginConfig,
 ) (ocr3_1types.ReportsPlusPrecursor, error) {
 	s.mu.RLock()
 	value := s.cachedReportsPlusPrecursor
@@ -167,7 +168,7 @@ func (s *PluginState) MemoizedReportsPlusPrecursor(
 		return value, nil
 	}
 
-	cryptoProvider, err := s.MemoizedCryptoProvider(ctx)
+	cryptoProvider, err := s.MemoizedCryptoProvider(ctx, attempt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get crypto provider: %w", err)
 	}

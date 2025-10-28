@@ -26,7 +26,7 @@ type (
 
 const (
 	expansionSeedSize                  = 16
-	statisticalSecurityBits            = 64
+	statisticalSecurityBits            = 128
 	computeWeightForParameterSelection = 50 // trade-off factor for optimal parameter selection, in percent [0, 100]
 )
 
@@ -62,6 +62,7 @@ type VESS interface {
 
 type vess struct {
 	curve      math.Curve               // elliptic curve used for the VESS protocol
+	iid        dkgtypes.InstanceID      // DKG instance ID
 	crs        dkgtypes.P256PublicKey   // common reference string, derived from the DKG's instance ID
 	n          int                      // number of recipients
 	t          int                      // secret sharing threshold
@@ -105,7 +106,7 @@ func NewVESS(curve math.Curve, iid dkgtypes.InstanceID, tag string, n int, t int
 		R = ek[:n:n]
 	}
 
-	return &vess{curve, crs, n, t, R, ek, OP.N, OP.M}, nil
+	return &vess{curve, iid, crs, n, t, R, ek, OP.N, OP.M}, nil
 }
 
 func (v *vess) internal() *vess {
@@ -247,7 +248,7 @@ func (v *vess) Decrypt(R int, dkᵢ dkgtypes.P256Keyring, D *VerifiedDealing, ad
 
 	// index for ρ_ωʺ and ρ_E
 	i := 0
-	for /* k */ _, kInS := range S {
+	for k, kInS := range S {
 		if !kInS {
 			continue
 		}
@@ -256,7 +257,7 @@ func (v *vess) Decrypt(R int, dkᵢ dkgtypes.P256Keyring, D *VerifiedDealing, ad
 		Eₖ := ρ_E[i]
 		i++
 
-		sꞌ_R_bytes, err := mre.Decrypt(n+1, R, dkᵢ, Eₖ, ad)
+		sꞌ_R_bytes, err := mre.Decrypt(k, n+1, R, dkᵢ, Eₖ, ad)
 		if err != nil {
 			// For some iterations, the decryption may fail, this is okay and expected, we retry in another iteration.
 			// This could in principle also happen despite of a successful prior call to VerifyDealing, which only
@@ -331,7 +332,7 @@ func (v *vess) zkpCommitRound(k int, seedₖ ExpansionSeed, ad []byte) (ωꞌₖ
 	}
 
 	// Compute [Eₖ] <-- MRE.Enc([ek_R], [ω'ₖ]([R]), ad, rₖ)
-	Eₖ, err = mre.Encrypt(v.ek, m, ad, rₖ)
+	Eₖ, err = mre.Encrypt(k, v.ek, m, ad, rₖ)
 	return
 }
 
@@ -415,6 +416,7 @@ func (v *vess) validateResponses(ρ_ωʺ []Scalars, ρ_E []Ciphertext, ρ_seed [
 // Computes the hash hExp(t, k, seedₖ, ad).
 func (v *vess) hExp(k int, seedₖ ExpansionSeed, ad []byte) (ExpansionSeed, []Scalar, error) {
 	h := xof.New("chain.link/san-marino-dkg/v1/vess/hExp")
+	h.WriteString(string(v.iid))
 	h.WriteInt(v.t)
 	h.WriteInt(k)
 	h.WriteBytes(seedₖ[:])
@@ -440,6 +442,7 @@ func (v *vess) hExp(k int, seedₖ ExpansionSeed, ad []byte) (ExpansionSeed, []S
 // Compute the hash hComp(C'₁, E₁, ..., C'_N, E_N, ad).
 func (v *vess) hComp(Cꞌ [][]Point, E []Ciphertext, ad []byte) []byte {
 	h := xof.New("chain.link/san-marino-dkg/v1/vess/hComp")
+	h.WriteString(string(v.iid))
 	for i, Cꞌᵢ := range Cꞌ {
 		for _, Cꞌᵢⱼ := range Cꞌᵢ {
 			h.WriteBytes(Cꞌᵢⱼ.Bytes())
@@ -458,6 +461,7 @@ func (v *vess) hComp(Cꞌ [][]Point, E []Ciphertext, ad []byte) []byte {
 // M... size of the subset to be selected
 func (v *vess) hCh(C []Point, h []byte, ad []byte) ([]bool, error) {
 	hasher := xof.New("chain.link/san-marino-dkg/v1/vess/hCh")
+	hasher.WriteString(string(v.iid))
 	hasher.WriteInt(v.N)
 	hasher.WriteInt(v.M)
 	for _, Cᵢ := range C {

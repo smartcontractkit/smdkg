@@ -158,11 +158,11 @@ func dealingSize(curve math.Curve, n int, t int, N int, M int) int {
 
 	// Now compute the total size of the dealing.
 	size := 0
-	size += 1                      // curve type
-	size += codec.IntSize          // t
-	size += codec.IntSize          // N
-	size += codec.IntSize          // M
-	size += t * curve.PointBytes() // C
+	size += 1                                        // curve type
+	size += codec.IntSize                            // t
+	size += codec.IntSize                            // N
+	size += codec.IntSize                            // M
+	size += t * (curve.PointBytes() + codec.IntSize) // C, point encoding is length-prefixed
 	size += xof.DigestLength
 	size += M * ρ_wʺ_E_size             // M tuples (ρ_wʺ[i], ρ_E[i])
 	size += (N - M) * expansionSeedSize // N-M expansion seeds

@@ -16,9 +16,9 @@ type PluginState struct {
 	cryptoProvider dkg.DKG      // the crypto provider (after initialization) is itself stateless
 	mu             sync.RWMutex // mutex to synchronize access to underlying fields
 
-	initialPhase           plugintypes.PluginPhase                // used when no phase is stored in the kv store
-	initialBannedDealers   plugintypes.BannedDealers              // used when no banned dealers are stored in the kv store
-	initCryptoProviderFunc func(context.Context) (dkg.DKG, error) // used to initialize the crypto provider on access (cached afterwards)
+	initialPhase           plugintypes.PluginPhase                     // used when no phase is stored in the kv store
+	initialBannedDealers   plugintypes.BannedDealers                   // used when no banned dealers are stored in the kv store
+	initCryptoProviderFunc func(context.Context, int) (dkg.DKG, error) // used to initialize the crypto provider on access (cached afterwards)
 
 	phaseUnmarshaler codec.Unmarshaler[plugintypes.PluginPhase]
 
@@ -43,7 +43,7 @@ type PluginState struct {
 func New(
 	initialPhase plugintypes.PluginPhase,
 	initialBannedDealers plugintypes.BannedDealers,
-	initCryptoProviderFunc func(context.Context) (dkg.DKG, error),
+	initCryptoProviderFunc func(context.Context, int) (dkg.DKG, error),
 	pluginPhaseUnmarshaler codec.Unmarshaler[plugintypes.PluginPhase],
 ) *PluginState {
 	return &PluginState{

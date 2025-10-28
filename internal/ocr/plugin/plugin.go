@@ -73,13 +73,13 @@ func (f *DKGPluginFactory) NewReportingPlugin(context context.Context,
 	// Transform the keyring from the dkgocrtypes.P256Keyring type to the dkgtypes.P256Keyring type
 	keyring, err := p256keyringshim.New(f.keyring)
 	if err != nil {
-		return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to transform DKG keyring: %w", err)
+		return nil, ocr3_1types.ReportingPluginInfo1{}, fmt.Errorf("failed to transform DKG keyring: %w", err)
 	}
 
 	// Extract ReportingPluginConfig from the offchain config
 	pluginConfig := &dkgocrtypes.ReportingPluginConfig{}
 	if err := pluginConfig.UnmarshalBinary(config.OffchainConfig); err != nil {
-		return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to unmarshal DKG plugin config: %w", err)
+		return nil, ocr3_1types.ReportingPluginInfo1{}, fmt.Errorf("failed to unmarshal DKG plugin config: %w", err)
 	}
 
 	// Transform the public keys of dealers from byte slices to dkgtypes.P256PublicKey
@@ -87,7 +87,7 @@ func (f *DKGPluginFactory) NewReportingPlugin(context context.Context,
 	for i, pk := range pluginConfig.DealerPublicKeys {
 		dealers[i], err = dkgtypes.NewP256PublicKey(pk)
 		if err != nil {
-			return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to derive dealer %d public key: %w", i, err)
+			return nil, ocr3_1types.ReportingPluginInfo1{}, fmt.Errorf("failed to derive dealer %d public key: %w", i, err)
 		}
 	}
 
@@ -96,7 +96,7 @@ func (f *DKGPluginFactory) NewReportingPlugin(context context.Context,
 	for i, pk := range pluginConfig.RecipientPublicKeys {
 		recipients[i], err = dkgtypes.NewP256PublicKey(pk)
 		if err != nil {
-			return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf("failed to derive recipient %d public key: %w", i, err)
+			return nil, ocr3_1types.ReportingPluginInfo1{}, fmt.Errorf("failed to derive recipient %d public key: %w", i, err)
 		}
 	}
 
@@ -127,9 +127,9 @@ func (f *DKGPluginFactory) NewReportingPlugin(context context.Context,
 	// Try to initialize the crypto provider (DKG instance), this may fail if we need to load a previous result
 	// package that is not yet available. In this case it will be retried later when needed.
 	isResharing := pluginConfig.PreviousInstanceID != nil
-	cryptoProvider, err := plugin.state.MemoizedCryptoProvider(context)
+	cryptoProvider, err := plugin.state.MemoizedCryptoProvider(context, 0)
 	if err != nil && !isResharing {
-		return nil, ocr3_1types.ReportingPluginInfo{}, fmt.Errorf(
+		return nil, ocr3_1types.ReportingPluginInfo1{}, fmt.Errorf(
 			"failed to initialize crypto provider for non-resharing DKG instance: %w", err,
 		)
 	}
@@ -149,7 +149,7 @@ func (f *DKGPluginFactory) NewReportingPlugin(context context.Context,
 	)
 	loosenedLimits := limitsEstimator.LoosenedLimitsByPercentage(20)
 
-	pluginInfo := ocr3_1types.ReportingPluginInfo{"DKGPlugin", loosenedLimits}
+	pluginInfo := ocr3_1types.ReportingPluginInfo1{"DKGPlugin", loosenedLimits}
 
 	return plugin, pluginInfo, nil
 }
@@ -173,7 +173,7 @@ type DKGPlugin struct {
 var _ ocr3_1types.ReportingPlugin[struct{}] = &DKGPlugin{}
 
 func (p *DKGPlugin) Query(
-	ctx context.Context, seqNr uint64, keyValueReader ocr3_1types.KeyValueReader,
+	ctx context.Context, seqNr uint64, keyValueReader ocr3_1types.KeyValueStateReader,
 	blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher,
 ) (types.Query, error) {
 	// Nothing needed to be sent in the query, all should be determined by the pluginState in the kvStore.
@@ -181,7 +181,7 @@ func (p *DKGPlugin) Query(
 }
 
 func (p *DKGPlugin) Observation(
-	ctx context.Context, seqNr uint64, aq types.AttributedQuery, keyValueReader ocr3_1types.KeyValueReader,
+	ctx context.Context, seqNr uint64, aq types.AttributedQuery, keyValueReader ocr3_1types.KeyValueStateReader,
 	blobBroadcastFetcher ocr3_1types.BlobBroadcastFetcher,
 ) (types.Observation, error) {
 	phase, err := p.state.ReadPhase(keyValueReader)
@@ -193,7 +193,7 @@ func (p *DKGPlugin) Observation(
 
 func (p *DKGPlugin) ValidateObservation(
 	ctx context.Context, seqNr uint64, aq types.AttributedQuery, ao types.AttributedObservation,
-	keyValueReader ocr3_1types.KeyValueReader, blobFetcher ocr3_1types.BlobFetcher,
+	keyValueReader ocr3_1types.KeyValueStateReader, blobFetcher ocr3_1types.BlobFetcher,
 ) error {
 	phase, err := p.state.ReadPhase(keyValueReader)
 	if err != nil {
@@ -203,7 +203,7 @@ func (p *DKGPlugin) ValidateObservation(
 }
 
 func (p *DKGPlugin) ObservationQuorum(ctx context.Context, seqNr uint64, aq types.AttributedQuery,
-	aos []types.AttributedObservation, keyValueReader ocr3_1types.KeyValueReader,
+	aos []types.AttributedObservation, keyValueReader ocr3_1types.KeyValueStateReader,
 	blobFetcher ocr3_1types.BlobFetcher,
 ) (bool, error) {
 	phase, err := p.state.ReadPhase(keyValueReader)
@@ -214,7 +214,7 @@ func (p *DKGPlugin) ObservationQuorum(ctx context.Context, seqNr uint64, aq type
 }
 
 func (p *DKGPlugin) StateTransition(ctx context.Context, seqNr uint64, aq types.AttributedQuery,
-	aos []types.AttributedObservation, keyValueReadWriter ocr3_1types.KeyValueReadWriter,
+	aos []types.AttributedObservation, keyValueReadWriter ocr3_1types.KeyValueStateReadWriter,
 	blobFetcher ocr3_1types.BlobFetcher,
 ) (ocr3_1types.ReportsPlusPrecursor, error) {
 	phase, err := p.state.ReadPhase(keyValueReadWriter)
@@ -224,7 +224,7 @@ func (p *DKGPlugin) StateTransition(ctx context.Context, seqNr uint64, aq types.
 	return phase.StateTransition(ctx, seqNr, aq, aos, keyValueReadWriter, blobFetcher)
 }
 
-func (p *DKGPlugin) Committed(ctx context.Context, seqNr uint64, keyValueReader ocr3_1types.KeyValueReader) error {
+func (p *DKGPlugin) Committed(ctx context.Context, seqNr uint64, keyValueReader ocr3_1types.KeyValueStateReader) error {
 	// No operation needed after commit for DKG; not used in current OCR3.1.
 	return nil
 }
@@ -266,7 +266,7 @@ func (p *DKGPlugin) Close() error {
 	return nil
 }
 
-func (p *DKGPlugin) initializeCryptoProvider(ctx context.Context) (dkg.DKG, error) {
+func (p *DKGPlugin) initializeCryptoProvider(ctx context.Context, attempt int) (dkg.DKG, error) {
 	previousInstanceID := p.pluginConfig.PreviousInstanceID
 
 	// Fresh dealing case, no nead to load any previous result package.
@@ -326,6 +326,7 @@ func (p *DKGPlugin) initializeCryptoProvider(ctx context.Context) (dkg.DKG, erro
 		p.f_D,
 		p.t_R,
 		p.keyring, previousResultPackage.Inner,
+		attempt,
 	)
 }
 

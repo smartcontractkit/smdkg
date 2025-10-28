@@ -11,7 +11,7 @@ import (
 // Access shim for the key/value store used by the DKG plugin.
 // The keys are defined below. The values are marshaled/unmarshaled using the codec package.
 //
-// Note: Read semantics of the underlying ocr3_1types.KeyValueReader are followed, i.e. if no value for a given key
+// Note: Read semantics of the underlying ocr3_1types.KeyValueStateReader are followed, i.e. if no value for a given key
 // exists, the zero value of the corresponding type is returned without an error (and unmarshaling is not attempted).
 
 const pluginPhaseKey = "PluginPhase"
@@ -54,9 +54,9 @@ func InnerDealingsKey(attempt int) storageKey {
 }
 
 // ReadObject reads and unmarshals an object from the key/value store. Follows the underlying semantics of
-// ocr3_1types.KeyValueReader.Read, i.e., if no value for the given key exists, the zero value of T is returned without
+// ocr3_1types.KeyValueStateReader.Read, i.e., if no value for the given key exists, the zero value of T is returned without
 // an error (and marshaling is not attempted).
-func ReadObject[T any](kvStore ocr3_1types.KeyValueReader, key storageKey, unmarshaler codec.Unmarshaler[T]) (T, error) {
+func ReadObject[T any](kvStore ocr3_1types.KeyValueStateReader, key storageKey, unmarshaler codec.Unmarshaler[T]) (T, error) {
 	var zero T
 
 	// Try to read the data from the key/value store.
@@ -82,7 +82,7 @@ func ReadObject[T any](kvStore ocr3_1types.KeyValueReader, key storageKey, unmar
 
 // WriteObject marshals and writes an object to the key/value store. If the call is successful, the number of bytes
 // written is returned.
-func WriteObject(kvStore ocr3_1types.KeyValueReadWriter, key storageKey, marshaler codec.Marshaler) (int, error) {
+func WriteObject(kvStore ocr3_1types.KeyValueStateReadWriter, key storageKey, marshaler codec.Marshaler) (int, error) {
 	data, err := codec.Marshal(marshaler)
 	if err != nil {
 		return 0, fmt.Errorf(
