@@ -116,7 +116,7 @@ func (v *vess) internal() *vess {
 // Generates a VESS dealing for the secret s, with random polynomial of degree t - 1.
 func (v *vess) Deal(s Scalar, ad []byte, rand io.Reader) (*VerifiedDealing, error) {
 	// Safeguard to ensure only VESS instances initialized with recipient public keys are used for dealing.
-	if v.recipients == nil {
+	if len(v.recipients) == 0 {
 		return nil, fmt.Errorf("cannot create dealing without recipient public keys")
 	}
 
@@ -178,7 +178,7 @@ func (v *vess) Deal(s Scalar, ad []byte, rand io.Reader) (*VerifiedDealing, erro
 // Verifies a given dealing D against the VESS instance parameters and the associated data ad.
 func (v *vess) VerifyDealing(D *UnverifiedDealing, ad []byte) (*VerifiedDealing, error) {
 	// Safeguard to ensure only VESS instances initialized with recipient public keys are used for verification.
-	if v.recipients == nil {
+	if len(v.recipients) == 0 {
 		return nil, fmt.Errorf("VESS instance not initialized with the recipients's public keys")
 	}
 

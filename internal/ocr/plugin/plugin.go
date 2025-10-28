@@ -232,7 +232,7 @@ func (p *DKGPlugin) Committed(ctx context.Context, seqNr uint64, keyValueReader 
 func (p *DKGPlugin) Reports(
 	ctx context.Context, seqNr uint64, reportsPlusPrecursor ocr3_1types.ReportsPlusPrecursor,
 ) ([]ocr3types.ReportPlus[struct{}], error) {
-	if reportsPlusPrecursor == nil {
+	if len(reportsPlusPrecursor) == 0 {
 		return nil, nil
 	}
 
