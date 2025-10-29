@@ -69,7 +69,7 @@ func reportingPluginLimits(estimator *dkg.BandwidthEstimator, pluginConfigLength
 		estimateBlobPayloadBytes(estimator),
 		// MaxPerOracleUnexpiredBlobCumulativePayloadBytes & MaxPerOracleUnexpiredBlobCount: We only keep one blob per other oracle at a given time.
 		estimateBlobPayloadBytes(estimator),
-		1,
+		100, // Technically we only need 1, but we add slack to account for yet-to-be-reaped blobs.
 	}
 }
 
