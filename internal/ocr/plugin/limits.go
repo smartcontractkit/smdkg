@@ -58,6 +58,9 @@ func (e *limitsEstimator) LoosenedLimitsByPercentage(percentage int) ocr3_1types
 
 // Returns the limits for the reporting plugin based on the given bandwidth estimator and plugin config length.
 func reportingPluginLimits(estimator *dkg.BandwidthEstimator, pluginConfigLength int) ocr3_1types.ReportingPluginLimits {
+	// Technically we only need 1, but we add slack to account for yet-to-be-reaped blobs.
+	const blobSlackFactor = 100
+
 	return ocr3_1types.ReportingPluginLimits{
 		0, // MaxQueryLength: Not sending any thing via Query
 		estimateObservationBytes(estimator),
@@ -67,9 +70,9 @@ func reportingPluginLimits(estimator *dkg.BandwidthEstimator, pluginConfigLength
 		5 * 2, // MaxKeyValueModifiedKeys: There are only 5 different keys/objects we write ever, see kv.go. We multiply by 2 to be on the safe side.
 		estimateKeyValueModifiedKeysPlusValuesBytes(estimator),
 		estimateBlobPayloadBytes(estimator),
-		// MaxPerOracleUnexpiredBlobCumulativePayloadBytes & MaxPerOracleUnexpiredBlobCount: We only keep one blob per other oracle at a given time.
-		estimateBlobPayloadBytes(estimator),
-		100, // Technically we only need 1, but we add slack to account for yet-to-be-reaped blobs.
+		// MaxPerOracleUnexpiredBlobCumulativePayloadBytes & MaxPerOracleUnexpiredBlobCount: We store at most blobSlackFactor blobs per other oracle at a given time.
+		blobSlackFactor * estimateBlobPayloadBytes(estimator),
+		blobSlackFactor,
 	}
 }
 
