@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/ocr3_1types"
 	"github.com/smartcontractkit/smdkg/internal/codec"
 	"github.com/smartcontractkit/smdkg/internal/crypto/dkg"
@@ -29,6 +31,7 @@ type PluginState struct {
 
 	// Cache storing all outbound initial dealings created by this node. Also stores a reference to the blob handle.
 	outboundInitialDealingsCache map[outboundInitialDealingsCacheKey]ocr3_1types.BlobHandle
+	outboundInitialDealingFlight singleflight.Group
 
 	// Cache storing all received verified initial dealings to avoid re-verification.
 	inboundDealingCache map[inboundInitialDealingsCacheKey]inboundInitialDealingsCacheValue
@@ -54,6 +57,7 @@ func New(
 		initCryptoProviderFunc,
 		pluginPhaseUnmarshaler,
 		make(map[outboundInitialDealingsCacheKey]ocr3_1types.BlobHandle),
+		singleflight.Group{},
 		make(map[inboundInitialDealingsCacheKey]inboundInitialDealingsCacheValue),
 		make(map[inboundDecryptionKeySharesCacheKey]inboundDecryptionKeySharesCacheValue),
 		nil,

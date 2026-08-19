@@ -82,6 +82,14 @@ func (f *DKGPluginFactory) NewReportingPlugin(context context.Context,
 		return nil, ocr3_1types.ReportingPluginInfo1{}, fmt.Errorf("failed to unmarshal DKG plugin config: %w", err)
 	}
 
+	// Configuration safeguard: we require that the number of dealers and the number of oracles match.
+	if len(pluginConfig.DealerPublicKeys) != config.N {
+		return nil, ocr3_1types.ReportingPluginInfo1{}, fmt.Errorf(
+			"invalid config: number of dealer public keys (%d) does not match the number of oracles N (%d)",
+			len(pluginConfig.DealerPublicKeys), config.N,
+		)
+	}
+
 	// Transform the public keys of dealers from byte slices to dkgtypes.P256PublicKey
 	dealers := make([]dkgtypes.P256PublicKey, len(pluginConfig.DealerPublicKeys))
 	for i, pk := range pluginConfig.DealerPublicKeys {

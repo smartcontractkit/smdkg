@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 
 	"github.com/smartcontractkit/libocr/offchainreporting2plus/ocr3_1types"
 	"github.com/smartcontractkit/smdkg/dkgocr/dkgocrtypes"
@@ -46,37 +47,52 @@ func (s *PluginState) MemoizedOutboundInitialDealingBlobHandle(
 		return val, nil
 	}
 
-	// We haven't created and broadcasted an initial dealing for this attempt yet.
-	// Let's create a fresh initial dealing now.
-	cryptoProvider, err := s.MemoizedCryptoProvider(ctx, attempt)
+	result, err, _ := s.outboundInitialDealingFlight.Do(strconv.Itoa(attempt), func() (any, error) {
+		// Check if there is any blob cached, just in case another goroutine finished Do() right before the current goroutine calls Do()
+		s.mu.RLock()
+		val, ok := s.outboundInitialDealingsCache[key]
+		s.mu.RUnlock()
+		if ok {
+			return val, nil
+		}
+
+		// We haven't created and broadcasted an initial dealing for this attempt yet.
+		// Let's create a fresh initial dealing now.
+		cryptoProvider, err := s.MemoizedCryptoProvider(ctx, attempt)
+		if err != nil {
+			return ocr3_1types.BlobHandle{}, err
+		}
+
+		dealing, err := cryptoProvider.Deal(rand)
+		if err != nil {
+			return ocr3_1types.BlobHandle{}, fmt.Errorf("failed to generate initial dealing: %w", err)
+		}
+
+		// Serialize the dealing as an unverified dealing for broadcasting as a blob.
+		dealingBytes, err := codec.Marshal(dealing.AsUnverifiedDealing())
+		if err != nil {
+			return ocr3_1types.BlobHandle{}, fmt.Errorf("failed to marshal unverified initial dealing: %w", err)
+		}
+
+		blobExpirationHint := ocr3_1types.BlobExpirationHintSequenceNumber{seqNr}
+		blobHandle, err := blobBroadcastFetcher.BroadcastBlob(ctx, dealingBytes, blobExpirationHint)
+		if err != nil {
+			return ocr3_1types.BlobHandle{}, fmt.Errorf(
+				"failed to disseminate initial dealing via blob broadcast: %w", err,
+			)
+		}
+
+		s.mu.Lock()
+		s.outboundInitialDealingsCache[key] = blobHandle
+		s.mu.Unlock()
+
+		return blobHandle, nil
+	})
+
 	if err != nil {
 		return ocr3_1types.BlobHandle{}, err
 	}
-
-	dealing, err := cryptoProvider.Deal(rand)
-	if err != nil {
-		return ocr3_1types.BlobHandle{}, fmt.Errorf("failed to generate initial dealing: %w", err)
-	}
-
-	// Serialize the dealing as an unverified dealing for broadcasting as a blob.
-	dealingBytes, err := codec.Marshal(dealing.AsUnverifiedDealing())
-	if err != nil {
-		return ocr3_1types.BlobHandle{}, fmt.Errorf("failed to marshal unverified initial dealing: %w", err)
-	}
-
-	blobExpirationHint := ocr3_1types.BlobExpirationHintSequenceNumber{seqNr}
-	blobHandle, err := blobBroadcastFetcher.BroadcastBlob(ctx, dealingBytes, blobExpirationHint)
-	if err != nil {
-		return ocr3_1types.BlobHandle{}, fmt.Errorf(
-			"failed to disseminate initial dealing via blob broadcast: %w", err,
-		)
-	}
-
-	s.mu.Lock()
-	s.outboundInitialDealingsCache[key] = blobHandle
-	s.mu.Unlock()
-
-	return blobHandle, nil
+	return result.(ocr3_1types.BlobHandle), nil
 }
 
 // Retrieve a verified initial dealing from cache if exists. Note that individual verified dealings are not persisted to

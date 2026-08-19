@@ -35,6 +35,14 @@ func New(seedArgs ...any) *UnsafeRand {
 	return &UnsafeRand{mrand.New(mrand.NewSource(seed))}
 }
 
+// Initializes a new UnsafeRand that produces a deterministic randomness based on the given raw seed, i.e.,
+// the generated sequence is exactly that of math/rand.New(math/rand.NewSource(seed)). In contrast to New, the
+// seed is used as is (not hashed), so the sequence is reproducible from the seed value alone.
+// The generated sequence is not cryptographically secure and should only be used for testing purposes.
+func NewFromSeed(seed int64) *UnsafeRand {
+	return &UnsafeRand{mrand.New(mrand.NewSource(seed))}
+}
+
 // Initializes a new UnsafeRand that produces non-deterministic randomness.
 func NewNondeterministic() *UnsafeRand {
 	var b [8]byte

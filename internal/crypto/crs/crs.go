@@ -1,6 +1,8 @@
 package crs
 
 import (
+	"io"
+
 	"github.com/smartcontractkit/smdkg/internal/crypto/dkgtypes"
 	"github.com/smartcontractkit/smdkg/internal/crypto/math"
 	"github.com/smartcontractkit/smdkg/internal/crypto/xof"
@@ -26,7 +28,18 @@ func NewP256CRS(iid dkgtypes.InstanceID, tag string) (dkgtypes.P256PublicKey, er
 	h := xof.New("chain.link/san-marino-dkg/v1/crs")
 	h.WriteString(string(iid))
 	h.WriteString(tag)
+	return newP256CRS(h)
+}
 
+// Like NewP256CRS, but derives the point from the provided binary input instead of a DKG instance ID.
+func NewP256CRSFromBytes(input []byte, tag string) (dkgtypes.P256PublicKey, error) {
+	h := xof.New("chain.link/san-marino-dkg/v1/crs")
+	h.WriteBytes(input)
+	h.WriteString(tag)
+	return newP256CRS(h)
+}
+
+func newP256CRS(h io.Reader) (dkgtypes.P256PublicKey, error) {
 	for {
 		x, err := math.NewScalar(p256FieldModulus).SetRandom(h)
 		if err != nil {

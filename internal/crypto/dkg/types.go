@@ -35,7 +35,7 @@ type Result interface {
 
 	// Check that the result is a valid result of DKG protocol execution with the given parameters.
 	Verify(
-		iid dkgtypes.InstanceID, curve math.Curve, t_R int, recipients []dkgtypes.P256PublicKey,
+		iid dkgtypes.InstanceID, curve math.Curve, n_D int, t_R int, recipients []dkgtypes.P256PublicKey,
 		resharing bool, masterPublicKey math.Point,
 	) (contributingDealerIndices []int, err error)
 }
@@ -222,7 +222,7 @@ func (r *result) MasterSecretKeyShare(R int, dk_R dkgtypes.P256Keyring) (math.Sc
 }
 
 func (r *result) Verify(
-	iid dkgtypes.InstanceID, curve math.Curve, t_R int, recipients []dkgtypes.P256PublicKey,
+	iid dkgtypes.InstanceID, curve math.Curve, n_D int, t_R int, recipients []dkgtypes.P256PublicKey,
 	resharing bool, masterPublicKey math.Point,
 ) ([]int, error) {
 	if r.iid != iid {
@@ -244,8 +244,8 @@ func (r *result) Verify(
 		return nil, fmt.Errorf("verification of a reshared DKG result requires a non-nil master public key to compare against")
 	}
 
-	if len(r.Lꞌ) == 0 {
-		return nil, fmt.Errorf("no inner dealings present")
+	if len(r.Lꞌ) != n_D {
+		return nil, fmt.Errorf("number of inner dealings list (%d) does not match number of dealers (%d)", len(r.Lꞌ), n_D)
 	}
 	if len(r.y_R) == 0 {
 		return nil, fmt.Errorf("no master public key shares present")
